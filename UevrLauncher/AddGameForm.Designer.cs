@@ -16,6 +16,10 @@ namespace UevrLauncher
         private System.Windows.Forms.Label lblDelay;
         private System.Windows.Forms.NumericUpDown numDelay;
         private System.Windows.Forms.Label lblDelayUnit;
+        private System.Windows.Forms.Label lblUevrBuild;
+        private System.Windows.Forms.RadioButton radioRelease;
+        private System.Windows.Forms.RadioButton radioNightly;
+        private System.Windows.Forms.Label lblUevrBuildHint;
         private System.Windows.Forms.Button btnOk;
         private System.Windows.Forms.Button btnCancel;
 
@@ -39,6 +43,10 @@ namespace UevrLauncher
             this.lblDelay = new System.Windows.Forms.Label();
             this.numDelay = new System.Windows.Forms.NumericUpDown();
             this.lblDelayUnit = new System.Windows.Forms.Label();
+            this.lblUevrBuild = new System.Windows.Forms.Label();
+            this.radioRelease = new System.Windows.Forms.RadioButton();
+            this.radioNightly = new System.Windows.Forms.RadioButton();
+            this.lblUevrBuildHint = new System.Windows.Forms.Label();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
 
@@ -104,14 +112,33 @@ namespace UevrLauncher
             this.lblDelayUnit.Location = new System.Drawing.Point(190, 336);
             this.lblDelayUnit.Text = "seconds  (try 15 for most UE games; bump up if UEVR misses the boot)";
 
-            this.btnOk.Location = new System.Drawing.Point(416, 374);
+            this.lblUevrBuild.AutoSize = true;
+            this.lblUevrBuild.Location = new System.Drawing.Point(16, 374);
+            this.lblUevrBuild.Text = "UEVR build:";
+
+            this.radioRelease.AutoSize = true;
+            this.radioRelease.Location = new System.Drawing.Point(112, 372);
+            this.radioRelease.Text = "Release";
+            this.radioRelease.UseVisualStyleBackColor = true;
+
+            this.radioNightly.AutoSize = true;
+            this.radioNightly.Location = new System.Drawing.Point(192, 372);
+            this.radioNightly.Text = "Nightly";
+            this.radioNightly.UseVisualStyleBackColor = true;
+
+            this.lblUevrBuildHint.AutoSize = true;
+            this.lblUevrBuildHint.Location = new System.Drawing.Point(270, 374);
+            this.lblUevrBuildHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblUevrBuildHint.Text = "Nightly = bleeding-edge praydog/UEVR; needed for some new games";
+
+            this.btnOk.Location = new System.Drawing.Point(416, 414);
             this.btnOk.Size = new System.Drawing.Size(85, 28);
             this.btnOk.Text = "OK";
             this.btnOk.Enabled = false;
             this.btnOk.UseVisualStyleBackColor = true;
             this.btnOk.Click += new System.EventHandler(this.btnOk_Click);
 
-            this.btnCancel.Location = new System.Drawing.Point(510, 374);
+            this.btnCancel.Location = new System.Drawing.Point(510, 414);
             this.btnCancel.Size = new System.Drawing.Size(85, 28);
             this.btnCancel.Text = "Cancel";
             this.btnCancel.UseVisualStyleBackColor = true;
@@ -119,7 +146,7 @@ namespace UevrLauncher
 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(614, 420);
+            this.ClientSize = new System.Drawing.Size(614, 460);
             this.Controls.Add(this.lblSearch);
             this.Controls.Add(this.txtSearch);
             this.Controls.Add(this.listGames);
@@ -130,6 +157,10 @@ namespace UevrLauncher
             this.Controls.Add(this.lblDelay);
             this.Controls.Add(this.numDelay);
             this.Controls.Add(this.lblDelayUnit);
+            this.Controls.Add(this.lblUevrBuild);
+            this.Controls.Add(this.radioRelease);
+            this.Controls.Add(this.radioNightly);
+            this.Controls.Add(this.lblUevrBuildHint);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.btnCancel);
             this.AcceptButton = this.btnOk;

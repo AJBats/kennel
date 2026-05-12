@@ -32,21 +32,7 @@ namespace UevrLauncher
             base.OnLoad(e);
             _config = ConfigStore.LoadConfig(_dataRoot);
             RefreshAll();
-
-            if (!ChihuahuaManager.IsInstalled(_dataRoot))
-            {
-                // Prompt to install chihuahua on first run. Non-blocking — user
-                // can dismiss and install later via the banner button.
-                BeginInvoke((MethodInvoker)(() =>
-                {
-                    var r = MessageBox.Show(this,
-                        "Kennel needs chihuahua (the UEVR injector) to do anything useful. " +
-                        "Download the latest release from GitHub now? (~6.5 MB)",
-                        "Install chihuahua?",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                    if (r == DialogResult.Yes) InstallOrUpdateChihuahua();
-                }));
-            }
+            stateTimer.Start();
         }
 
         protected override void OnActivated(EventArgs e)
@@ -57,29 +43,76 @@ namespace UevrLauncher
             if (IsHandleCreated && _config != null) RefreshAll();
         }
 
+        private void stateTimer_Tick(object sender, EventArgs e)
+        {
+            // Re-check Steam-running state without rescanning the wrapper list.
+            UpdateButtonGates();
+        }
+
         // ----- Refresh / Render -----
 
         private void RefreshAll()
         {
             RefreshChihuahuaBanner();
             RefreshWrapperList();
+            UpdateButtonGates();
         }
 
         private void RefreshChihuahuaBanner()
         {
-            if (ChihuahuaManager.IsInstalled(_dataRoot) && !string.IsNullOrEmpty(_config?.Chihuahua?.Tag))
+            bool installed = ChihuahuaManager.IsInstalled(_dataRoot);
+            if (installed && !string.IsNullOrEmpty(_config?.Chihuahua?.Tag))
             {
                 string when = "";
                 if (DateTime.TryParse(_config.Chihuahua.InstalledAt, out var ts))
                     when = " (installed " + ts.ToLocalTime().ToString("yyyy-MM-dd") + ")";
                 lblChihuahuaStatus.Text = "chihuahua: " + _config.Chihuahua.Tag + when;
+                lblChihuahuaStatus.ForeColor = System.Drawing.SystemColors.ControlText;
                 btnChihuahua.Text = "Check for chihuahua update";
+                btnChihuahua.BackColor = System.Drawing.SystemColors.Control;
+                btnChihuahua.ForeColor = System.Drawing.SystemColors.ControlText;
+                btnChihuahua.UseVisualStyleBackColor = true;
+                btnChihuahua.Font = new System.Drawing.Font(btnChihuahua.Font, System.Drawing.FontStyle.Regular);
             }
             else
             {
-                lblChihuahuaStatus.Text = "chihuahua: not installed";
+                lblChihuahuaStatus.Text = "⚠  chihuahua is not installed";
+                lblChihuahuaStatus.ForeColor = System.Drawing.Color.FromArgb(193, 39, 45);
                 btnChihuahua.Text = "Install chihuahua";
+                btnChihuahua.UseVisualStyleBackColor = false;
+                btnChihuahua.BackColor = System.Drawing.Color.FromArgb(193, 39, 45);
+                btnChihuahua.ForeColor = System.Drawing.Color.White;
+                btnChihuahua.Font = new System.Drawing.Font(btnChihuahua.Font, System.Drawing.FontStyle.Bold);
             }
+        }
+
+        // Toggles visibility of the Steam-running warning and enables/disables
+        // any action that would touch localconfig.vdf accordingly. Called from
+        // the 3-second poll timer and from any state-changing action.
+        private void UpdateButtonGates()
+        {
+            bool steamRunning = SteamConfig.IsSteamRunning();
+            bool chihuahuaOk = ChihuahuaManager.IsInstalled(_dataRoot);
+
+            lblSteamWarning.Visible = steamRunning;
+            lblSteamWarning.Text = steamRunning
+                ? "⚠  Steam is running — quit Steam to add, edit, or delete wrappers"
+                : "";
+
+            bool hasSelection = listWrappers.SelectedItems.Count > 0;
+
+            btnAddGame.Enabled = chihuahuaOk && !steamRunning;
+            btnEdit.Enabled = hasSelection && chihuahuaOk && !steamRunning;
+            btnDelete.Enabled = hasSelection && !steamRunning;
+
+            // Tooltips explain *why* a button is disabled.
+            string blockReason = null;
+            if (steamRunning) blockReason = "Steam is running — quit Steam first";
+            else if (!chihuahuaOk) blockReason = "chihuahua is not installed";
+
+            toolTip.SetToolTip(btnAddGame, blockReason);
+            toolTip.SetToolTip(btnEdit, blockReason);
+            toolTip.SetToolTip(btnDelete, steamRunning ? "Steam is running — quit Steam first" : null);
         }
 
         private void RefreshWrapperList()
@@ -113,15 +146,18 @@ namespace UevrLauncher
             }
             listWrappers.EndUpdate();
 
-            btnEdit.Enabled = btnDelete.Enabled = listWrappers.SelectedItems.Count > 0;
+            UpdateButtonGates();
         }
 
         private string ValidateRow(WrapperRow row)
         {
-            if (!File.Exists(row.Wrapper.GameExePath)) return "⚠ exe missing";
-            if (!ChihuahuaManager.IsInstalled(_dataRoot)) return "⚠ no chihuahua";
-            if (string.IsNullOrEmpty(row.AppId)) return "⚠ no Steam link";
-            return "✓ valid";
+            string suffix = string.Equals(row.Wrapper.UevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
+                ? "  (nightly)"
+                : "";
+            if (!File.Exists(row.Wrapper.GameExePath)) return "⚠ exe missing" + suffix;
+            if (!ChihuahuaManager.IsInstalled(_dataRoot)) return "⚠ no chihuahua" + suffix;
+            if (string.IsNullOrEmpty(row.AppId)) return "⚠ no Steam link" + suffix;
+            return "✓ valid" + suffix;
         }
 
         // ----- Chihuahua install / update -----
@@ -151,19 +187,15 @@ namespace UevrLauncher
                 if (ChihuahuaManager.IsInstalled(_dataRoot) &&
                     !ChihuahuaManager.IsUpdateAvailable(_config?.Chihuahua?.Tag, latest))
                 {
-                    MessageBox.Show(this,
-                        "Up to date (" + latest.Tag + ").",
-                        "chihuahua", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // Quietly reflect "up to date" in the banner; no popup.
+                    FlashBannerOk("✓  chihuahua " + latest.Tag + " — up to date");
                     return;
                 }
 
-                bool isUpdate = ChihuahuaManager.IsInstalled(_dataRoot);
-                string verb = isUpdate ? "Update" : "Install";
-                var r = MessageBox.Show(this,
-                    $"{verb} chihuahua {latest.Tag}? ({latest.AssetSizeBytes / 1024} KB)" +
-                    (isUpdate ? "\n\nThe current version will be kept as a rollback." : ""),
-                    verb + " chihuahua", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
-                if (r != DialogResult.OK) return;
+                // The button label itself already reads "Install" or "Check for
+                // update", so the click was the user's confirmation. Skip the
+                // popup confirm; if we're updating, the .bak rollback is the
+                // safety net.
 
                 // Run the download on a background thread, marshalling progress
                 // back to the UI thread.
@@ -196,9 +228,7 @@ namespace UevrLauncher
 
                 _config = ConfigStore.LoadConfig(_dataRoot);
                 RefreshAll();
-                MessageBox.Show(this,
-                    "chihuahua " + latest.Tag + " installed.",
-                    "chihuahua", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                FlashBannerOk("✓  chihuahua " + latest.Tag + " installed");
             }
             finally
             {
@@ -206,11 +236,31 @@ namespace UevrLauncher
             }
         }
 
-        // ----- List selection & buttons (stubs filled in next pass) -----
+        // Show a transient confirmation in the chihuahua banner area, then
+        // restore the real status after a few seconds. Lighter-touch than a
+        // popup for "expected good" outcomes.
+        private void FlashBannerOk(string message)
+        {
+            var savedText = lblChihuahuaStatus.Text;
+            var savedColor = lblChihuahuaStatus.ForeColor;
+            lblChihuahuaStatus.Text = message;
+            lblChihuahuaStatus.ForeColor = System.Drawing.Color.FromArgb(34, 124, 70);
+
+            var t = new System.Windows.Forms.Timer { Interval = 3000 };
+            t.Tick += (s, e) =>
+            {
+                t.Stop();
+                t.Dispose();
+                if (!IsDisposed) RefreshChihuahuaBanner();
+            };
+            t.Start();
+        }
+
+        // ----- List selection & buttons -----
 
         private void listWrappers_SelectedIndexChanged(object sender, EventArgs e)
         {
-            btnEdit.Enabled = btnDelete.Enabled = listWrappers.SelectedItems.Count > 0;
+            UpdateButtonGates();
         }
 
         private void btnAddGame_Click(object sender, EventArgs e)
@@ -239,13 +289,8 @@ namespace UevrLauncher
                 "Delete wrapper", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
             if (r != DialogResult.OK) return;
 
-            if (!string.IsNullOrEmpty(row.AppId) && SteamConfig.IsSteamRunning())
-            {
-                MessageBox.Show(this,
-                    "Please quit Steam first. Kennel can't safely clear launch options while Steam is running.",
-                    "Steam is running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            // Steam-running guard is handled by btnDelete being disabled when
+            // Steam is up; no popup needed here.
 
             try
             {
@@ -267,15 +312,8 @@ namespace UevrLauncher
 
         private void ShowAddOrEdit(WrapperRow existing)
         {
-            if (!ChihuahuaManager.IsInstalled(_dataRoot))
-            {
-                var r = MessageBox.Show(this,
-                    "chihuahua isn't installed yet. Install it now?",
-                    "Need chihuahua", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                if (r != DialogResult.Yes) return;
-                InstallOrUpdateChihuahua();
-                if (!ChihuahuaManager.IsInstalled(_dataRoot)) return;
-            }
+            // Button gates already prevent reaching here when chihuahua is
+            // missing or Steam is running; no popup soup needed.
 
             AddGameForm dlg;
             if (existing == null)
@@ -302,23 +340,22 @@ namespace UevrLauncher
                         InstallPath = "",
                     };
                 }
-                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds);
+                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds, existing.Wrapper.UevrBuild);
             }
 
             using (dlg)
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName);
+                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName, dlg.ResultUevrBuild);
             }
         }
 
-        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName)
+        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName, string uevrBuild)
         {
-            if (game == null || string.IsNullOrEmpty(game.AppId))
-            {
-                MessageBox.Show(this, "No Steam game selected.", "Add wrapper", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            // Dialog only returns DialogResult.OK when a game is selected and
+            // its exe exists; UpdateButtonGates blocks Add/Edit entry when
+            // Steam is running. So we can go straight to the write here.
+            if (game == null || string.IsNullOrEmpty(game.AppId)) return;
 
             // Editing keeps the original basename so the .bat/.vbs paths and
             // the Steam launch options remain in sync.
@@ -326,20 +363,12 @@ namespace UevrLauncher
                 ? existing.Wrapper.Basename
                 : MakeUniqueBasename(Slug.FromGameName(gameName ?? game.Name));
 
-            if (SteamConfig.IsSteamRunning())
-            {
-                MessageBox.Show(this,
-                    "Please quit Steam first. Kennel can't safely write launch options while Steam is running.",
-                    "Steam is running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
             try
             {
                 var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
                 var chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot);
 
-                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, wrappersDir);
+                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, wrappersDir);
 
                 var launchOpts = WrapperIo.BuildSteamLaunchOptions(basename, wrappersDir);
                 var user = SteamConfig.FindActiveUser();

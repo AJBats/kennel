@@ -20,22 +20,28 @@ namespace UevrLauncher
         public string ResultExePath { get; private set; }
         public int ResultDelaySeconds { get; private set; }
         public string ResultGameName { get; private set; }
+        public string ResultUevrBuild { get; private set; }    // "Release" or "Nightly"
 
         // Add mode.
         public AddGameForm()
         {
             _editMode = false;
             InitializeComponent();
+            radioRelease.Checked = true;
         }
 
         // Edit mode: lock in the existing game, pre-fill fields.
-        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay)
+        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay, string existingUevrBuild)
         {
             _editMode = true;
             InitializeComponent();
             SelectedGame = existingGame;
             txtExePath.Text = existingExe ?? "";
             numDelay.Value = Math.Max(numDelay.Minimum, Math.Min(numDelay.Maximum, existingDelay));
+            if (string.Equals(existingUevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+                radioNightly.Checked = true;
+            else
+                radioRelease.Checked = true;
         }
 
         protected override void OnLoad(EventArgs e)
@@ -131,6 +137,9 @@ namespace UevrLauncher
             ResultExePath = txtExePath.Text.Trim();
             ResultDelaySeconds = (int)numDelay.Value;
             ResultGameName = SelectedGame?.Name;
+            ResultUevrBuild = radioNightly.Checked
+                ? WrapperIo.UevrBuildNightly
+                : WrapperIo.UevrBuildRelease;
             DialogResult = DialogResult.OK;
             Close();
         }

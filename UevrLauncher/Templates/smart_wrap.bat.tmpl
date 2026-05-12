@@ -13,7 +13,8 @@ REM --- VR mode: chihuahua launches the game and injects UEVR ---
 "{{ChihuahuaExe}}" ^
  "{{GameExe}}" ^
  --delay {{Delay}} ^
- --runtime OpenXR
+ --runtime OpenXR ^
+ --uevr-build {{UevrBuild}}
 exit /b %ERRORLEVEL%
 :no_chihuahua
 mshta "javascript:alert('Kennel: chihuahua.exe is missing.\n\nOpen Kennel to reinstall.\nLaunching in flat mode.');close();"

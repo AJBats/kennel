@@ -23,16 +23,26 @@ namespace UevrLauncher.Services
 
         // ----- Write -----
 
+        public const string UevrBuildRelease = "Release";
+        public const string UevrBuildNightly = "Nightly";
+
         public static void Write(
             string basename,
             string gameName,
             string gameExePath,
             int delaySeconds,
             string chihuahuaExePath,
+            string uevrBuild,        // "Release" or "Nightly"
             string wrappersDir)
         {
             ValidateBasename(basename);
             Directory.CreateDirectory(wrappersDir);
+
+            // Defensive normalize: chihuahua only accepts these two literals.
+            string normalizedBuild =
+                string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
+                    ? UevrBuildNightly
+                    : UevrBuildRelease;
 
             string batPath = BatPathFor(basename, wrappersDir);
             string vbsPath = VbsPathFor(basename, wrappersDir);
@@ -41,7 +51,8 @@ namespace UevrLauncher.Services
                 .Replace("{{GameName}}", gameName ?? basename)
                 .Replace("{{ChihuahuaExe}}", chihuahuaExePath)
                 .Replace("{{GameExe}}", gameExePath)
-                .Replace("{{Delay}}", delaySeconds.ToString());
+                .Replace("{{Delay}}", delaySeconds.ToString())
+                .Replace("{{UevrBuild}}", normalizedBuild);
 
             string vbs = LoadTemplate("smart_wrap.vbs.tmpl")
                 .Replace("{{BatFileName}}", Path.GetFileName(batPath))
@@ -77,12 +88,19 @@ namespace UevrLauncher.Services
             string delayStr = MatchOrNull(bat, @"--delay\s+(\d+)");
             int delay = int.TryParse(delayStr, out var d) ? d : 0;
 
+            // --uevr-build was added later; old wrappers won't have it. Treat
+            // absence as Release since that matches chihuahua's own default.
+            string uevrBuild = MatchOrNull(bat, @"--uevr-build\s+(\w+)") ?? UevrBuildRelease;
+            if (!string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+                uevrBuild = UevrBuildRelease;
+
             return new WrapperInfo
             {
                 Basename = basename,
                 GameName = gameName,
                 GameExePath = gameExe,
                 DelaySeconds = delay,
+                UevrBuild = uevrBuild,
                 BatPath = batPath,
                 VbsPath = File.Exists(vbsPath) ? vbsPath : null,
             };

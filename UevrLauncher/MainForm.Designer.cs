@@ -5,6 +5,7 @@ namespace UevrLauncher
         private System.ComponentModel.IContainer components = null;
         private System.Windows.Forms.Label lblChihuahuaStatus;
         private System.Windows.Forms.Button btnChihuahua;
+        private System.Windows.Forms.Label lblSteamWarning;
         private System.Windows.Forms.ListView listWrappers;
         private System.Windows.Forms.ColumnHeader colGame;
         private System.Windows.Forms.ColumnHeader colDelay;
@@ -12,6 +13,8 @@ namespace UevrLauncher
         private System.Windows.Forms.Button btnAddGame;
         private System.Windows.Forms.Button btnEdit;
         private System.Windows.Forms.Button btnDelete;
+        private System.Windows.Forms.ToolTip toolTip;
+        private System.Windows.Forms.Timer stateTimer;
 
         protected override void Dispose(bool disposing)
         {
@@ -21,8 +24,10 @@ namespace UevrLauncher
 
         private void InitializeComponent()
         {
+            this.components = new System.ComponentModel.Container();
             this.lblChihuahuaStatus = new System.Windows.Forms.Label();
             this.btnChihuahua = new System.Windows.Forms.Button();
+            this.lblSteamWarning = new System.Windows.Forms.Label();
             this.listWrappers = new System.Windows.Forms.ListView();
             this.colGame = new System.Windows.Forms.ColumnHeader();
             this.colDelay = new System.Windows.Forms.ColumnHeader();
@@ -30,6 +35,8 @@ namespace UevrLauncher
             this.btnAddGame = new System.Windows.Forms.Button();
             this.btnEdit = new System.Windows.Forms.Button();
             this.btnDelete = new System.Windows.Forms.Button();
+            this.toolTip = new System.Windows.Forms.ToolTip(this.components);
+            this.stateTimer = new System.Windows.Forms.Timer(this.components);
             this.SuspendLayout();
 
             this.lblChihuahuaStatus.AutoSize = false;
@@ -45,6 +52,18 @@ namespace UevrLauncher
             this.btnChihuahua.UseVisualStyleBackColor = true;
             this.btnChihuahua.Click += new System.EventHandler(this.btnChihuahua_Click);
 
+            this.lblSteamWarning.AutoSize = false;
+            this.lblSteamWarning.Location = new System.Drawing.Point(16, 40);
+            this.lblSteamWarning.Size = new System.Drawing.Size(804, 20);
+            this.lblSteamWarning.Text = "";
+            this.lblSteamWarning.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lblSteamWarning.Font = new System.Drawing.Font("Segoe UI", 9.5F, System.Drawing.FontStyle.Bold);
+            this.lblSteamWarning.ForeColor = System.Drawing.Color.FromArgb(180, 95, 6);
+            this.lblSteamWarning.Visible = false;
+            this.lblSteamWarning.Anchor = System.Windows.Forms.AnchorStyles.Top |
+                System.Windows.Forms.AnchorStyles.Left |
+                System.Windows.Forms.AnchorStyles.Right;
+
             this.colGame.Text = "Game";
             this.colGame.Width = 460;
             this.colDelay.Text = "Delay";
@@ -56,9 +75,9 @@ namespace UevrLauncher
                 this.colGame, this.colDelay, this.colStatus });
             this.listWrappers.FullRowSelect = true;
             this.listWrappers.HideSelection = false;
-            this.listWrappers.Location = new System.Drawing.Point(16, 50);
+            this.listWrappers.Location = new System.Drawing.Point(16, 68);
             this.listWrappers.MultiSelect = false;
-            this.listWrappers.Size = new System.Drawing.Size(804, 380);
+            this.listWrappers.Size = new System.Drawing.Size(804, 362);
             this.listWrappers.UseCompatibleStateImageBehavior = false;
             this.listWrappers.View = System.Windows.Forms.View.Details;
             this.listWrappers.Anchor = System.Windows.Forms.AnchorStyles.Top |
@@ -96,10 +115,14 @@ namespace UevrLauncher
             this.ClientSize = new System.Drawing.Size(836, 484);
             this.Controls.Add(this.lblChihuahuaStatus);
             this.Controls.Add(this.btnChihuahua);
+            this.Controls.Add(this.lblSteamWarning);
             this.Controls.Add(this.listWrappers);
             this.Controls.Add(this.btnAddGame);
             this.Controls.Add(this.btnEdit);
             this.Controls.Add(this.btnDelete);
+
+            this.stateTimer.Interval = 3000;
+            this.stateTimer.Tick += new System.EventHandler(this.stateTimer_Tick);
             this.MinimumSize = new System.Drawing.Size(700, 400);
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Kennel";
