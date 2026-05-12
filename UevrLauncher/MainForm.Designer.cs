@@ -18,7 +18,7 @@ namespace UevrLauncher
             this.components = new System.ComponentModel.Container();
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(900, 540);
-            this.Text = "UEVR Launcher Manager";
+            this.Text = "Kennel";
             this.MinimumSize = new System.Drawing.Size(700, 400);
         }
     }

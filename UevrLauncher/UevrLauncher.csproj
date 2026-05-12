@@ -7,7 +7,10 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <RootNamespace>UevrLauncher</RootNamespace>
-    <AssemblyName>UevrLauncher</AssemblyName>
+    <AssemblyName>Kennel</AssemblyName>
+    <Product>Kennel</Product>
+    <AssemblyTitle>Kennel</AssemblyTitle>
+    <Description>UEVR launcher manager for Steam</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>0.1.0</Version>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
