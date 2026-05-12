@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Forms;
+using UevrLauncher.Services;
 
 namespace UevrLauncher
 {
@@ -10,7 +11,20 @@ namespace UevrLauncher
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+
+            var bootstrap = ConfigStore.LoadBootstrap();
+            if (bootstrap == null)
+            {
+                using (var dlg = new FirstRunForm())
+                {
+                    if (dlg.ShowDialog() != DialogResult.OK) return;
+                    bootstrap = new InstallBootstrap { DataRoot = dlg.SelectedDataRoot };
+                    ConfigStore.SaveBootstrap(bootstrap);
+                }
+            }
+            ConfigStore.InitializeDataRoot(bootstrap.DataRoot);
+
+            Application.Run(new MainForm(bootstrap.DataRoot));
         }
     }
 }

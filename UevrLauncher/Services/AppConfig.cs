@@ -87,11 +87,16 @@ namespace UevrLauncher.Services
         }
 
         // Create <DataRoot> and its subdirs. Safe to call repeatedly.
+        //
+        // We intentionally don't pre-create the chihuahua\ subdir — that's
+        // owned by ChihuahuaManager.Install, which uses an atomic
+        // rename-into-place pattern. Pre-creating an empty chihuahua\ dir
+        // would cause the first install to rotate it into chihuahua.bak\,
+        // leaving a useless empty backup.
         public static void InitializeDataRoot(string dataRoot)
         {
             Directory.CreateDirectory(dataRoot);
             Directory.CreateDirectory(WrappersDir(dataRoot));
-            Directory.CreateDirectory(ChihuahuaDir(dataRoot));
         }
 
         // ----- Config -----
