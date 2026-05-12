@@ -17,9 +17,12 @@ namespace UevrLauncher
         private AppConfig _config;
         private readonly List<WrapperRow> _rows = new List<WrapperRow>();
 
-        // Cached release info from the last "check updates" press; null if not
-        // fetched this session.
-        private ChihuahuaManager.ReleaseInfo _latestRelease;
+        // Cached Font instances for the chihuahua button so RefreshChihuahuaBanner
+        // doesn't allocate a new GDI handle on every refresh (the previous
+        // pattern leaked one Font per OnActivated → GDI exhaustion in long
+        // sessions). Disposed in OnFormClosed.
+        private Font _btnFontRegular;
+        private Font _btnFontBold;
 
         public MainForm(string dataRoot)
         {
@@ -30,9 +33,54 @@ namespace UevrLauncher
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            _btnFontRegular = new Font(btnChihuahua.Font, FontStyle.Regular);
+            _btnFontBold = new Font(btnChihuahua.Font, FontStyle.Bold);
+
+            // One-time migration from the pre-Option-B single-chihuahua\ layout.
+            // After this runs, the data root has chihuahua-release\ and
+            // chihuahua-nightly\, and every existing wrapper's .bat is rewritten
+            // to point at the right mode-specific chihuahua.exe.
+            try
+            {
+                if (ChihuahuaManager.NeedsMigration(_dataRoot))
+                    ChihuahuaManager.Migrate(_dataRoot);
+                // Always normalize wrapper paths against the current chihuahua
+                // layout. Cheap, idempotent, and covers the case where a fresh
+                // chihuahua install left old wrappers pointing at the pre-split
+                // single-dir path.
+                if (ChihuahuaManager.IsInstalled(_dataRoot))
+                    RewriteAllWrappersForCurrentChihuahuaLayout();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Migrating to twin chihuahua layout hit a problem: " + ex.Message +
+                    "\n\nThe app will continue but wrappers may be broken until you re-add them.",
+                    "Kennel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
             _config = ConfigStore.LoadConfig(_dataRoot);
             RefreshAll();
             stateTimer.Start();
+        }
+
+        // Rewrite every wrapper's .bat to point at the chihuahua.exe matching
+        // its UEVR-build mode. Idempotent — safe to call multiple times.
+        private void RewriteAllWrappersForCurrentChihuahuaLayout()
+        {
+            var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
+            foreach (var w in WrapperIo.List(wrappersDir))
+            {
+                var exe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, w.UevrBuild);
+                WrapperIo.Write(w.Basename, w.GameName, w.GameExePath, w.DelaySeconds, exe, w.UevrBuild, wrappersDir);
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            _btnFontRegular?.Dispose();
+            _btnFontBold?.Dispose();
+            base.OnFormClosed(e);
         }
 
         protected override void OnActivated(EventArgs e)
@@ -72,7 +120,7 @@ namespace UevrLauncher
                 btnChihuahua.BackColor = System.Drawing.SystemColors.Control;
                 btnChihuahua.ForeColor = System.Drawing.SystemColors.ControlText;
                 btnChihuahua.UseVisualStyleBackColor = true;
-                btnChihuahua.Font = new System.Drawing.Font(btnChihuahua.Font, System.Drawing.FontStyle.Regular);
+                if (_btnFontRegular != null) btnChihuahua.Font = _btnFontRegular;
             }
             else
             {
@@ -82,7 +130,7 @@ namespace UevrLauncher
                 btnChihuahua.UseVisualStyleBackColor = false;
                 btnChihuahua.BackColor = System.Drawing.Color.FromArgb(193, 39, 45);
                 btnChihuahua.ForeColor = System.Drawing.Color.White;
-                btnChihuahua.Font = new System.Drawing.Font(btnChihuahua.Font, System.Drawing.FontStyle.Bold);
+                if (_btnFontBold != null) btnChihuahua.Font = _btnFontBold;
             }
         }
 
@@ -167,6 +215,9 @@ namespace UevrLauncher
         private async void InstallOrUpdateChihuahua()
         {
             btnChihuahua.Enabled = false;
+            // Outer catch is mandatory for any async void handler — anything
+            // that escapes here ends the process (unobserved task exceptions
+            // on the WinForms sync context terminate on net48).
             try
             {
                 ChihuahuaManager.ReleaseInfo latest;
@@ -181,8 +232,6 @@ namespace UevrLauncher
                         "chihuahua update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-
-                _latestRelease = latest;
 
                 if (ChihuahuaManager.IsInstalled(_dataRoot) &&
                     !ChihuahuaManager.IsUpdateAvailable(_config?.Chihuahua?.Tag, latest))
@@ -208,8 +257,17 @@ namespace UevrLauncher
                         {
                             ChihuahuaManager.Install(_dataRoot, latest, (cur, total) =>
                             {
-                                if (progress.IsHandleCreated)
-                                    progress.BeginInvoke((MethodInvoker)(() => progress.Report(cur, total)));
+                                // Marshalling onto a possibly-already-disposed
+                                // form from a worker thread is racy. Swallow
+                                // the standard two exceptions; everything else
+                                // bubbles to the outer catch.
+                                try
+                                {
+                                    if (progress.IsHandleCreated)
+                                        progress.BeginInvoke((MethodInvoker)(() => progress.Report(cur, total)));
+                                }
+                                catch (ObjectDisposedException) { }
+                                catch (InvalidOperationException) { }
                             });
                         });
                     }
@@ -229,6 +287,14 @@ namespace UevrLauncher
                 _config = ConfigStore.LoadConfig(_dataRoot);
                 RefreshAll();
                 FlashBannerOk("✓  chihuahua " + latest.Tag + " installed");
+            }
+            catch (Exception ex)
+            {
+                // Last-resort catch so a stray throw outside the inner blocks
+                // doesn't crash the app.
+                MessageBox.Show(this,
+                    "Unexpected error: " + ex.Message,
+                    "chihuahua", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -366,7 +432,10 @@ namespace UevrLauncher
             try
             {
                 var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
-                var chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot);
+                // Each wrapper points at its mode-specific chihuahua so toggling
+                // a wrapper between Release and Nightly doesn't force chihuahua
+                // to redownload UEVR DLLs — each install stays warm.
+                var chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, uevrBuild);
 
                 WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, wrappersDir);
 

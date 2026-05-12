@@ -33,22 +33,96 @@ namespace UevrLauncher.Services
         }
 
         // ----- Paths -----
+        //
+        // Twin install layout: separate dirs for Release-mode and Nightly-mode,
+        // each with its own chihuahua.exe and its own UEVR DLL slot. Each
+        // chihuahua keeps its own uevr.version in sync with the mode it serves,
+        // so toggling a wrapper's mode no longer forces chihuahua to re-fetch
+        // 12 MB of UEVR DLLs — each mode is permanently cached.
 
-        public static string ChihuahuaDir(string dataRoot)
-            => ConfigStore.ChihuahuaDir(dataRoot);
+        public static string ChihuahuaDir(string dataRoot, string uevrBuild)
+        {
+            string sub = string.Equals(uevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
+                ? "chihuahua-nightly"
+                : "chihuahua-release";
+            return Path.Combine(dataRoot, sub);
+        }
 
-        public static string ChihuahuaBackupDir(string dataRoot)
-            => ConfigStore.ChihuahuaBackupDir(dataRoot);
+        public static string ChihuahuaBackupDir(string dataRoot, string uevrBuild)
+            => ChihuahuaDir(dataRoot, uevrBuild) + ".bak";
 
-        public static string ChihuahuaExePath(string dataRoot)
-            => Path.Combine(ChihuahuaDir(dataRoot), "chihuahua.exe");
+        public static string ChihuahuaExePath(string dataRoot, string uevrBuild)
+            => Path.Combine(ChihuahuaDir(dataRoot, uevrBuild), "chihuahua.exe");
 
+        // True only when BOTH modes are installed. We always install/uninstall
+        // them as a pair so the GUI never has to expose "Nightly is missing"
+        // as a state.
         public static bool IsInstalled(string dataRoot)
-            => File.Exists(ChihuahuaExePath(dataRoot));
+            => File.Exists(ChihuahuaExePath(dataRoot, WrapperIo.UevrBuildRelease))
+               && File.Exists(ChihuahuaExePath(dataRoot, WrapperIo.UevrBuildNightly));
 
         public static bool HasBackup(string dataRoot)
-            => Directory.Exists(ChihuahuaBackupDir(dataRoot))
-               && File.Exists(Path.Combine(ChihuahuaBackupDir(dataRoot), "chihuahua.exe"));
+            => File.Exists(Path.Combine(ChihuahuaBackupDir(dataRoot, WrapperIo.UevrBuildRelease), "chihuahua.exe"))
+               || File.Exists(Path.Combine(ChihuahuaBackupDir(dataRoot, WrapperIo.UevrBuildNightly), "chihuahua.exe"));
+
+        // ----- One-time migration from old single-chihuahua layout -----
+
+        // True when the data root has the pre-Option-B layout: a single
+        // <dataRoot>\chihuahua\ dir, and the mode-specific dirs don't exist.
+        public static bool NeedsMigration(string dataRoot)
+        {
+            var oldDir = Path.Combine(dataRoot, "chihuahua");
+            return File.Exists(Path.Combine(oldDir, "chihuahua.exe"))
+                && !File.Exists(ChihuahuaExePath(dataRoot, WrapperIo.UevrBuildRelease))
+                && !File.Exists(ChihuahuaExePath(dataRoot, WrapperIo.UevrBuildNightly));
+        }
+
+        // Split the old <dataRoot>\chihuahua\ into mode dirs:
+        //   - the existing dir (which has UEVR DLLs for whichever mode it ran
+        //     in) becomes the dir for that mode
+        //   - the other mode gets a bare chihuahua.exe (+ its sidecars) so
+        //     it's ready to bootstrap UEVR DLLs on its first launch
+        // Detects the current mode by reading uevr.version: starts with
+        // "nightly" → Nightly, otherwise Release.
+        public static void Migrate(string dataRoot)
+        {
+            var oldDir = Path.Combine(dataRoot, "chihuahua");
+            if (!File.Exists(Path.Combine(oldDir, "chihuahua.exe"))) return;
+
+            string mode = WrapperIo.UevrBuildRelease;
+            var verPath = Path.Combine(oldDir, "uevr.version");
+            if (File.Exists(verPath))
+            {
+                var ver = File.ReadAllText(verPath).Trim();
+                if (ver.StartsWith("nightly", StringComparison.OrdinalIgnoreCase))
+                    mode = WrapperIo.UevrBuildNightly;
+            }
+
+            var existingDir = ChihuahuaDir(dataRoot, mode);
+            var otherDir = ChihuahuaDir(dataRoot, mode == WrapperIo.UevrBuildRelease
+                ? WrapperIo.UevrBuildNightly
+                : WrapperIo.UevrBuildRelease);
+
+            Directory.Move(oldDir, existingDir);
+
+            // Bootstrap the other mode with just the chihuahua binaries — its
+            // UEVR DLLs will be fetched on its first game launch.
+            Directory.CreateDirectory(otherDir);
+            foreach (var f in new[] { "chihuahua.exe", "chihuahua.pdb", "rai-pal-manifest.json" })
+            {
+                var src = Path.Combine(existingDir, f);
+                if (File.Exists(src)) File.Copy(src, Path.Combine(otherDir, f));
+            }
+
+            // The old .bak (if any) belonged to the same mode; rename to match.
+            var oldBak = Path.Combine(dataRoot, "chihuahua.bak");
+            if (Directory.Exists(oldBak))
+            {
+                var newBak = ChihuahuaBackupDir(dataRoot, mode);
+                if (Directory.Exists(newBak)) Directory.Delete(newBak, true);
+                Directory.Move(oldBak, newBak);
+            }
+        }
 
         // ----- Network -----
 
@@ -99,37 +173,53 @@ namespace UevrLauncher.Services
 
             Directory.CreateDirectory(dataRoot);
 
-            string chiDir = ChihuahuaDir(dataRoot);
-            string bakDir = ChihuahuaBackupDir(dataRoot);
+            string releaseDir = ChihuahuaDir(dataRoot, WrapperIo.UevrBuildRelease);
+            string nightlyDir = ChihuahuaDir(dataRoot, WrapperIo.UevrBuildNightly);
+            string releaseBak = ChihuahuaBackupDir(dataRoot, WrapperIo.UevrBuildRelease);
+            string nightlyBak = ChihuahuaBackupDir(dataRoot, WrapperIo.UevrBuildNightly);
             string tmpZip = Path.Combine(dataRoot, "chihuahua-download.zip.tmp");
-            string stageDir = Path.Combine(dataRoot, "chihuahua-stage.tmp");
+            string releaseStage = Path.Combine(dataRoot, "chihuahua-release.stage.tmp");
+            string nightlyStage = Path.Combine(dataRoot, "chihuahua-nightly.stage.tmp");
 
             // Clean any leftover staging from a previous failed install.
             if (File.Exists(tmpZip)) File.Delete(tmpZip);
-            if (Directory.Exists(stageDir)) Directory.Delete(stageDir, true);
+            if (Directory.Exists(releaseStage)) Directory.Delete(releaseStage, true);
+            if (Directory.Exists(nightlyStage)) Directory.Delete(nightlyStage, true);
 
             try
             {
                 DownloadWithProgress(release.AssetUrl, tmpZip, release.AssetSizeBytes, onProgress);
 
-                Directory.CreateDirectory(stageDir);
-                ZipFile.ExtractToDirectory(tmpZip, stageDir);
+                long downloadedSize = new FileInfo(tmpZip).Length;
+                if (downloadedSize != release.AssetSizeBytes)
+                {
+                    throw new InvalidDataException(
+                        $"Download size mismatch: expected {release.AssetSizeBytes} bytes, " +
+                        $"got {downloadedSize}. Refusing to extract.");
+                }
 
-                if (!File.Exists(Path.Combine(stageDir, "chihuahua.exe")))
+                // Extract once into the Release stage; copy to the Nightly
+                // stage. We can't extract twice from the same zip stream
+                // efficiently, and File.Copy is faster than a second
+                // ZipFile.OpenRead pass anyway.
+                Directory.CreateDirectory(releaseStage);
+                SafeExtractZip(tmpZip, releaseStage);
+                if (!File.Exists(Path.Combine(releaseStage, "chihuahua.exe")))
                 {
                     throw new InvalidDataException(
                         "Downloaded zip did not contain chihuahua.exe at its root.");
                 }
+                CopyDirectory(releaseStage, nightlyStage);
 
-                // Atomic swap. Order matters so a crash mid-swap is recoverable:
-                //   1. discard old .bak (if any)
-                //   2. rename existing chihuahua\ → .bak (only if chihuahua\ exists)
-                //   3. rename stage\ → chihuahua\
-                if (Directory.Exists(bakDir)) Directory.Delete(bakDir, true);
-                if (Directory.Exists(chiDir)) Directory.Move(chiDir, bakDir);
-                Directory.Move(stageDir, chiDir);
+                // Atomic-ish swap, both modes. Order matters so a crash mid-swap
+                // leaves recoverable state.
+                if (Directory.Exists(releaseBak)) Directory.Delete(releaseBak, true);
+                if (Directory.Exists(nightlyBak)) Directory.Delete(nightlyBak, true);
+                if (Directory.Exists(releaseDir)) Directory.Move(releaseDir, releaseBak);
+                if (Directory.Exists(nightlyDir)) Directory.Move(nightlyDir, nightlyBak);
+                Directory.Move(releaseStage, releaseDir);
+                Directory.Move(nightlyStage, nightlyDir);
 
-                // Record the install in config.json
                 var cfg = ConfigStore.LoadConfig(dataRoot);
                 cfg.Chihuahua.Tag = release.Tag;
                 cfg.Chihuahua.InstalledAt = DateTime.UtcNow.ToString("o");
@@ -137,17 +227,28 @@ namespace UevrLauncher.Services
             }
             finally
             {
-                // Clean up staging zip; staging dir is gone (renamed) on success
-                // or cleaned up on failure.
                 if (File.Exists(tmpZip))
                 {
                     try { File.Delete(tmpZip); } catch { /* best-effort */ }
                 }
-                if (Directory.Exists(stageDir))
+                foreach (var s in new[] { releaseStage, nightlyStage })
                 {
-                    try { Directory.Delete(stageDir, true); } catch { /* best-effort */ }
+                    if (Directory.Exists(s))
+                    {
+                        try { Directory.Delete(s, true); } catch { /* best-effort */ }
+                    }
                 }
             }
+        }
+
+        // Recursive copy. .NET Framework has no built-in for this.
+        private static void CopyDirectory(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (var f in Directory.GetFiles(src))
+                File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: true);
+            foreach (var d in Directory.GetDirectories(src))
+                CopyDirectory(d, Path.Combine(dst, Path.GetFileName(d)));
         }
 
         // Swap chihuahua\ ↔ chihuahua.bak\. Lets the user roll back to the
@@ -156,21 +257,23 @@ namespace UevrLauncher.Services
         // we just blank the tag field so an update prompt will fire again.
         public static void RestorePreviousVersion(string dataRoot)
         {
-            string chiDir = ChihuahuaDir(dataRoot);
-            string bakDir = ChihuahuaBackupDir(dataRoot);
-            string scratch = chiDir + ".swap.tmp";
-
             if (!HasBackup(dataRoot))
                 throw new InvalidOperationException("No backup to restore from.");
 
-            if (Directory.Exists(scratch)) Directory.Delete(scratch, true);
+            // Both modes were installed as a pair, so they roll back as a pair.
+            // We swap them in lockstep.
+            foreach (var mode in new[] { WrapperIo.UevrBuildRelease, WrapperIo.UevrBuildNightly })
+            {
+                string chiDir = ChihuahuaDir(dataRoot, mode);
+                string bakDir = ChihuahuaBackupDir(dataRoot, mode);
+                string scratch = chiDir + ".swap.tmp";
+                if (!Directory.Exists(bakDir)) continue;
+                if (Directory.Exists(scratch)) Directory.Delete(scratch, true);
+                if (Directory.Exists(chiDir)) Directory.Move(chiDir, scratch);
+                Directory.Move(bakDir, chiDir);
+                if (Directory.Exists(scratch)) Directory.Move(scratch, bakDir);
+            }
 
-            if (Directory.Exists(chiDir)) Directory.Move(chiDir, scratch);
-            Directory.Move(bakDir, chiDir);
-            if (Directory.Exists(scratch)) Directory.Move(scratch, bakDir);
-
-            // We don't know the prior tag (we only stored the current one), so
-            // blank the field. Next "Check for updates" will offer the latest.
             var cfg = ConfigStore.LoadConfig(dataRoot);
             cfg.Chihuahua.Tag = null;
             cfg.Chihuahua.InstalledAt = null;
@@ -178,6 +281,43 @@ namespace UevrLauncher.Services
         }
 
         // ----- Internals -----
+
+        // Replacement for ZipFile.ExtractToDirectory that defends against
+        // "zip-slip": malicious entries whose names resolve outside the
+        // destination directory via `..\..\` or absolute paths. .NET Framework
+        // 4.6.1+ has partial protection but it's been incomplete in the past
+        // and won't catch every shape (e.g. mixed slash directions, junctions).
+        // We do the check ourselves: resolve the would-be destination path,
+        // compare its prefix against the canonicalized stage dir, refuse if it
+        // doesn't match.
+        private static void SafeExtractZip(string zipPath, string destDir)
+        {
+            string destFull = Path.GetFullPath(destDir);
+            if (!destFull.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+                destFull += Path.DirectorySeparatorChar;
+
+            using (var archive = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var entry in archive.Entries)
+                {
+                    // Skip directory entries (FullName ends with '/'). Files
+                    // inside them implicitly create the directory below.
+                    if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                    string targetPath = Path.GetFullPath(Path.Combine(destDir, entry.FullName));
+                    if (!targetPath.StartsWith(destFull, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException(
+                            "Refusing zip entry '" + entry.FullName + "' — resolved path " +
+                            "is outside the staging directory (zip-slip).");
+                    }
+
+                    var parent = Path.GetDirectoryName(targetPath);
+                    if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+                    entry.ExtractToFile(targetPath, overwrite: true);
+                }
+            }
+        }
 
         private static void EnsureTls12()
         {

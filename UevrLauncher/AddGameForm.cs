@@ -49,10 +49,11 @@ namespace UevrLauncher
             base.OnLoad(e);
             if (_editMode)
             {
+                lblSearch.Visible = false;
                 txtSearch.Visible = false;
                 listGames.Visible = false;
                 lblGameLocked.Visible = true;
-                lblGameLocked.Text = "Game: " + (SelectedGame?.Name ?? "?") + "  (appid " + (SelectedGame?.AppId ?? "?") + ")";
+                lblGameLocked.Text = SelectedGame?.Name ?? "";
                 this.Text = "Edit wrapper";
                 UpdateOkEnabled();
                 return;
@@ -78,7 +79,7 @@ namespace UevrLauncher
                 if (filter.Length == 0 ||
                     g.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    var item = new ListViewItem(new[] { g.Name, g.AppId }) { Tag = g };
+                    var item = new ListViewItem(g.Name) { Tag = g };
                     listGames.Items.Add(item);
                 }
             }

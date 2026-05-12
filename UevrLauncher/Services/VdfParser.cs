@@ -265,7 +265,23 @@ namespace UevrLauncher.Services
                     if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '{' || c == '}' || c == '"') break;
                     _i++;
                 }
-                return _s.Substring(start, _i - start);
+                string token = _s.Substring(start, _i - start);
+
+                // Valve KeyValues allows conditional clauses like [$WIN32]
+                // [$WINDOWS] [!$LINUX] after a value or block to gate the
+                // preceding entry to a platform. We don't model them — if we
+                // parsed and re-serialized one, we'd drop the gate and Steam
+                // would silently start applying values to the wrong platform.
+                // Refuse rather than corrupt.
+                if (token.Length > 0 && token[0] == '[')
+                {
+                    throw new InvalidDataException(
+                        "VDF contains a conditional clause (" + token + "); " +
+                        "Kennel refuses to modify this file to avoid corrupting it. " +
+                        "Please file an issue if you see this.");
+                }
+
+                return token;
             }
         }
     }

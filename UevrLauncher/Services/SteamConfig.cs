@@ -60,10 +60,15 @@ namespace UevrLauncher.Services
 
         public static bool IsSteamRunning()
         {
-            // Use the process name without extension to match what
-            // Process.GetProcessesByName expects.
-            try { return Process.GetProcessesByName("steam").Length > 0; }
+            // GetProcessesByName returns Process[] of native-handle-holding
+            // objects; without disposing them we leak handles every call (and
+            // this is polled every 3 seconds from the GUI). Dispose every one
+            // before returning.
+            Process[] procs;
+            try { procs = Process.GetProcessesByName("steam"); }
             catch { return false; }
+            try { return procs.Length > 0; }
+            finally { foreach (var p in procs) p.Dispose(); }
         }
 
         // ----- Read -----
@@ -94,7 +99,7 @@ namespace UevrLauncher.Services
                 launchOptions);
 
             BackupOnce(path);
-            File.WriteAllText(path, VdfParser.Serialize(root));
+            ConfigStore.WriteAllTextAtomic(path, VdfParser.Serialize(root));
         }
 
         // Remove the LaunchOptions entry for an app (e.g. when deleting a
@@ -118,7 +123,7 @@ namespace UevrLauncher.Services
             app["LaunchOptions"] = string.Empty;
 
             BackupOnce(path);
-            File.WriteAllText(path, VdfParser.Serialize(root));
+            ConfigStore.WriteAllTextAtomic(path, VdfParser.Serialize(root));
         }
 
         // ----- Internals -----

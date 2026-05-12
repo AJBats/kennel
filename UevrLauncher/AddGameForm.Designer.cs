@@ -8,7 +8,6 @@ namespace UevrLauncher
         private System.Windows.Forms.TextBox txtSearch;
         private System.Windows.Forms.ListView listGames;
         private System.Windows.Forms.ColumnHeader colGame;
-        private System.Windows.Forms.ColumnHeader colAppId;
         private System.Windows.Forms.Label lblGameLocked;
         private System.Windows.Forms.Label lblExe;
         private System.Windows.Forms.TextBox txtExePath;
@@ -19,7 +18,6 @@ namespace UevrLauncher
         private System.Windows.Forms.Label lblUevrBuild;
         private System.Windows.Forms.RadioButton radioRelease;
         private System.Windows.Forms.RadioButton radioNightly;
-        private System.Windows.Forms.Label lblUevrBuildHint;
         private System.Windows.Forms.Button btnOk;
         private System.Windows.Forms.Button btnCancel;
 
@@ -35,7 +33,6 @@ namespace UevrLauncher
             this.txtSearch = new System.Windows.Forms.TextBox();
             this.listGames = new System.Windows.Forms.ListView();
             this.colGame = new System.Windows.Forms.ColumnHeader();
-            this.colAppId = new System.Windows.Forms.ColumnHeader();
             this.lblGameLocked = new System.Windows.Forms.Label();
             this.lblExe = new System.Windows.Forms.Label();
             this.txtExePath = new System.Windows.Forms.TextBox();
@@ -46,7 +43,6 @@ namespace UevrLauncher
             this.lblUevrBuild = new System.Windows.Forms.Label();
             this.radioRelease = new System.Windows.Forms.RadioButton();
             this.radioNightly = new System.Windows.Forms.RadioButton();
-            this.lblUevrBuildHint = new System.Windows.Forms.Label();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
 
@@ -63,12 +59,11 @@ namespace UevrLauncher
             this.txtSearch.TextChanged += new System.EventHandler(this.txtSearch_TextChanged);
 
             this.colGame.Text = "Game";
-            this.colGame.Width = 470;
-            this.colAppId.Text = "App ID";
-            this.colAppId.Width = 90;
+            this.colGame.Width = 560;
 
             this.listGames.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
-                this.colGame, this.colAppId });
+                this.colGame });
+            this.listGames.HeaderStyle = System.Windows.Forms.ColumnHeaderStyle.None;
             this.listGames.FullRowSelect = true;
             this.listGames.HideSelection = false;
             this.listGames.Location = new System.Drawing.Point(16, 66);
@@ -110,7 +105,7 @@ namespace UevrLauncher
 
             this.lblDelayUnit.AutoSize = true;
             this.lblDelayUnit.Location = new System.Drawing.Point(190, 336);
-            this.lblDelayUnit.Text = "seconds  (try 15 for most UE games; bump up if UEVR misses the boot)";
+            this.lblDelayUnit.Text = "seconds";
 
             this.lblUevrBuild.AutoSize = true;
             this.lblUevrBuild.Location = new System.Drawing.Point(16, 374);
@@ -125,11 +120,6 @@ namespace UevrLauncher
             this.radioNightly.Location = new System.Drawing.Point(192, 372);
             this.radioNightly.Text = "Nightly";
             this.radioNightly.UseVisualStyleBackColor = true;
-
-            this.lblUevrBuildHint.AutoSize = true;
-            this.lblUevrBuildHint.Location = new System.Drawing.Point(270, 374);
-            this.lblUevrBuildHint.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.lblUevrBuildHint.Text = "Nightly = bleeding-edge praydog/UEVR; needed for some new games";
 
             this.btnOk.Location = new System.Drawing.Point(416, 414);
             this.btnOk.Size = new System.Drawing.Size(85, 28);
@@ -160,7 +150,6 @@ namespace UevrLauncher
             this.Controls.Add(this.lblUevrBuild);
             this.Controls.Add(this.radioRelease);
             this.Controls.Add(this.radioNightly);
-            this.Controls.Add(this.lblUevrBuildHint);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.btnCancel);
             this.AcceptButton = this.btnOk;

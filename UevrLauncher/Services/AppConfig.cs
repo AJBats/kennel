@@ -64,8 +64,8 @@ namespace UevrLauncher.Services
 
         public static string ConfigJson(string dataRoot) => Path.Combine(dataRoot, "config.json");
         public static string WrappersDir(string dataRoot) => Path.Combine(dataRoot, "wrappers");
-        public static string ChihuahuaDir(string dataRoot) => Path.Combine(dataRoot, "chihuahua");
-        public static string ChihuahuaBackupDir(string dataRoot) => Path.Combine(dataRoot, "chihuahua.bak");
+        // Chihuahua paths moved to ChihuahuaManager — they're mode-specific
+        // (chihuahua-release\ / chihuahua-nightly\) under the twin-install layout.
 
         // ----- Bootstrap -----
 
@@ -163,8 +163,11 @@ namespace UevrLauncher.Services
             return sb.ToString();
         }
 
-        // Write then rename so a crash mid-write never leaves a half-file behind.
-        private static void WriteAllTextAtomic(string path, string contents)
+        // Write then rename so a crash mid-write never leaves a half-file
+        // behind. Public because SteamConfig also needs this guarantee when
+        // editing localconfig.vdf — corruption there destroys per-game state
+        // that Steam may not regenerate.
+        public static void WriteAllTextAtomic(string path, string contents)
         {
             string tmp = path + ".tmp";
             File.WriteAllText(tmp, contents);
