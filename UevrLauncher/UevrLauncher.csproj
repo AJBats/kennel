@@ -18,6 +18,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Templates\smart_wrap.bat.tmpl" />
     <EmbeddedResource Include="Templates\smart_wrap.vbs.tmpl" />
   </ItemGroup>

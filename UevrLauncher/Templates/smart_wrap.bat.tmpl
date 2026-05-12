@@ -8,9 +8,14 @@ REM --- Flat mode ---
 %*
 exit /b %ERRORLEVEL%
 :vr
+if not exist "{{ChihuahuaExe}}" goto :no_chihuahua
 REM --- VR mode: chihuahua launches the game and injects UEVR ---
 "{{ChihuahuaExe}}" ^
  "{{GameExe}}" ^
  --delay {{Delay}} ^
  --runtime OpenXR
+exit /b %ERRORLEVEL%
+:no_chihuahua
+mshta "javascript:alert('Kennel: chihuahua.exe is missing.\n\nOpen Kennel to reinstall.\nLaunching in flat mode.');close();"
+%*
 exit /b %ERRORLEVEL%
