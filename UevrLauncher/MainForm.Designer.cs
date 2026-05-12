@@ -65,11 +65,11 @@ namespace UevrLauncher
                 System.Windows.Forms.AnchorStyles.Right;
 
             this.colGame.Text = "Game";
-            this.colGame.Width = 460;
+            this.colGame.Width = 440;
             this.colDelay.Text = "Delay";
-            this.colDelay.Width = 80;
+            this.colDelay.Width = 100;
             this.colStatus.Text = "Status";
-            this.colStatus.Width = 200;
+            this.colStatus.Width = 240;
 
             this.listWrappers.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
                 this.colGame, this.colDelay, this.colStatus });

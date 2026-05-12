@@ -11,6 +11,14 @@ namespace UevrLauncher
             InitializeComponent();
         }
 
+        // Override the default header/title for non-chihuahua downloads (the
+        // UEVR frontend fetch reuses this dialog).
+        public void SetHeader(string headerText, string windowTitle = "Kennel")
+        {
+            lblHeader.Text = headerText;
+            Text = windowTitle;
+        }
+
         public void Report(long current, long total)
         {
             if (total > 0)

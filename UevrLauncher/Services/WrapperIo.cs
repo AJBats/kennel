@@ -33,6 +33,8 @@ namespace UevrLauncher.Services
             int delaySeconds,
             string chihuahuaExePath,
             string uevrBuild,        // "Release" or "Nightly"
+            bool manualInjection,
+            string uevrInjectorExePath,  // path to UEVRInjector.exe matching uevrBuild (only used when manualInjection)
             string wrappersDir)
         {
             ValidateBasename(basename);
@@ -47,12 +49,17 @@ namespace UevrLauncher.Services
             string batPath = BatPathFor(basename, wrappersDir);
             string vbsPath = VbsPathFor(basename, wrappersDir);
 
+            string vrBlock = manualInjection
+                ? BuildManualVrBlock(uevrInjectorExePath)
+                : BuildChihuahuaVrBlock(chihuahuaExePath, gameExePath, delaySeconds, normalizedBuild);
+
             string bat = LoadTemplate("smart_wrap.bat.tmpl")
                 .Replace("{{GameName}}", gameName ?? basename)
-                .Replace("{{ChihuahuaExe}}", chihuahuaExePath)
-                .Replace("{{GameExe}}", gameExePath)
+                .Replace("{{GameExe}}", gameExePath ?? "")
                 .Replace("{{Delay}}", delaySeconds.ToString())
-                .Replace("{{UevrBuild}}", normalizedBuild);
+                .Replace("{{UevrBuild}}", normalizedBuild)
+                .Replace("{{Manual}}", manualInjection ? "true" : "false")
+                .Replace("{{VrBlock}}", vrBlock);
 
             string vbs = LoadTemplate("smart_wrap.vbs.tmpl")
                 .Replace("{{BatFileName}}", Path.GetFileName(batPath))
@@ -60,6 +67,47 @@ namespace UevrLauncher.Services
 
             File.WriteAllText(batPath, NormalizeCrlf(bat));
             File.WriteAllText(vbsPath, NormalizeCrlf(vbs));
+        }
+
+        // chihuahua auto-injection block. Falls through to :no_chihuahua if the
+        // exe is missing; chihuahua handles UEVR DLL download + injection.
+        private static string BuildChihuahuaVrBlock(
+            string chihuahuaExePath, string gameExePath, int delaySeconds, string uevrBuild)
+        {
+            return string.Join("\n", new[]
+            {
+                "if not exist \"" + chihuahuaExePath + "\" goto :no_chihuahua",
+                "REM --- VR mode: chihuahua launches the game and injects UEVR ---",
+                "\"" + chihuahuaExePath + "\" ^",
+                " \"" + gameExePath + "\" ^",
+                " --delay " + delaySeconds + " ^",
+                " --runtime OpenXR ^",
+                " --uevr-build " + uevrBuild,
+                "exit /b %ERRORLEVEL%",
+            });
+        }
+
+        // Manual injection block: ensure the UEVR frontend is running (start it
+        // if not), then launch the game flat. The user injects from the
+        // frontend after the game is up.
+        //
+        // UEVRInjector.exe requires admin privileges (its manifest requests
+        // requireAdministrator), so we elevate via PowerShell's RunAs verb.
+        // That triggers the standard UAC prompt; once the user accepts,
+        // UEVRInjector launches elevated in parallel with the game.
+        private static string BuildManualVrBlock(string uevrInjectorExePath)
+        {
+            return string.Join("\n", new[]
+            {
+                "REM --- Manual injection mode: bring up the UEVR frontend and launch flat ---",
+                "if not exist \"" + uevrInjectorExePath + "\" goto :no_chihuahua",
+                "tasklist /FI \"IMAGENAME eq UEVRInjector.exe\" 2>NUL | find /I \"UEVRInjector.exe\" >NUL",
+                "if \"%ERRORLEVEL%\"==\"0\" goto :manual_run",
+                "powershell -NoProfile -Command \"Start-Process -FilePath '" + uevrInjectorExePath + "' -Verb RunAs\"",
+                ":manual_run",
+                "%*",
+                "exit /b %ERRORLEVEL%",
+            });
         }
 
         // ----- Read -----
@@ -74,25 +122,47 @@ namespace UevrLauncher.Services
 
             string gameName = MatchOrNull(bat, @"^REM Smart launcher for (.+) \(Steam library entry\)\.\s*$");
 
-            // The VR block looks like:
-            //   "<chihuahua>" ^
-            //    "<game.exe>" ^
-            //    --delay <N> ^
-            //    --runtime OpenXR
-            // We pull the game exe by anchoring on the line that comes between
-            // the chihuahua call and the --delay line.
-            string gameExe = MatchOrNull(bat,
-                @"^\s+""([^""]+\.exe)""\s+\^\s*\r?\n\s+--delay\s+\d+",
-                RegexOptions.Multiline);
+            // All wrapper state lives in REM comments at the top so reads are
+            // unambiguous across both auto and manual modes. We also keep the
+            // chihuahua command line legacy regex as a fallback so wrappers
+            // written by older versions of Kennel still parse correctly.
+            //
+            // Patterns deliberately don't anchor with $: in multiline mode $
+            // matches before \n but NOT before \r, and our files are CRLF.
+            // The capture groups are bounded enough on their own.
+            string gameExe = MatchOrNull(bat, @"^REM Kennel-GameExe=([^\r\n]+)", RegexOptions.Multiline);
+            string delayStr = MatchOrNull(bat, @"^REM Kennel-Delay=(\d+)", RegexOptions.Multiline);
+            string uevrBuild = MatchOrNull(bat, @"^REM Kennel-UevrBuild=(\w+)", RegexOptions.Multiline);
+            string manualStr = MatchOrNull(bat, @"^REM Kennel-Manual=(true|false)", RegexOptions.Multiline);
 
-            string delayStr = MatchOrNull(bat, @"--delay\s+(\d+)");
+            // Legacy fallback — pre-metadata wrappers had values only in the
+            // chihuahua command line.
+            if (gameExe == null)
+            {
+                gameExe = MatchOrNull(bat,
+                    @"^\s+""([^""]+\.exe)""\s+\^\s*\r?\n\s+--delay\s+\d+",
+                    RegexOptions.Multiline);
+            }
+            if (delayStr == null)
+            {
+                delayStr = MatchOrNull(bat, @"--delay\s+(\d+)");
+            }
+            if (uevrBuild == null)
+            {
+                uevrBuild = MatchOrNull(bat, @"--uevr-build\s+(\w+)");
+            }
+
             int delay = int.TryParse(delayStr, out var d) ? d : 0;
-
-            // --uevr-build was added later; old wrappers won't have it. Treat
-            // absence as Release since that matches chihuahua's own default.
-            string uevrBuild = MatchOrNull(bat, @"--uevr-build\s+(\w+)") ?? UevrBuildRelease;
             if (!string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
                 uevrBuild = UevrBuildRelease;
+            bool manualInjection = string.Equals(manualStr, "true", StringComparison.OrdinalIgnoreCase);
+
+            // Invariant: Manual ⇒ Release. The UEVRInjector frontend is only
+            // published at the latest tagged release (1.05); there's no
+            // "nightly frontend." Forcing Release when Manual keeps the saved
+            // metadata honest about which DLLs will actually inject. Any
+            // legacy Nightly+Manual wrapper self-migrates on next read.
+            if (manualInjection) uevrBuild = UevrBuildRelease;
 
             return new WrapperInfo
             {
@@ -101,6 +171,7 @@ namespace UevrLauncher.Services
                 GameExePath = gameExe,
                 DelaySeconds = delay,
                 UevrBuild = uevrBuild,
+                ManualInjection = manualInjection,
                 BatPath = batPath,
                 VbsPath = File.Exists(vbsPath) ? vbsPath : null,
             };

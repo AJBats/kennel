@@ -21,6 +21,7 @@ namespace UevrLauncher
         public int ResultDelaySeconds { get; private set; }
         public string ResultGameName { get; private set; }
         public string ResultUevrBuild { get; private set; }    // "Release" or "Nightly"
+        public bool ResultManualInjection { get; private set; }
 
         // Add mode.
         public AddGameForm()
@@ -28,20 +29,43 @@ namespace UevrLauncher
             _editMode = false;
             InitializeComponent();
             radioRelease.Checked = true;
+            WireManualToggle();
         }
 
         // Edit mode: lock in the existing game, pre-fill fields.
-        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay, string existingUevrBuild)
+        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay, string existingUevrBuild, bool existingManual)
         {
             _editMode = true;
             InitializeComponent();
             SelectedGame = existingGame;
             txtExePath.Text = existingExe ?? "";
-            numDelay.Value = Math.Max(numDelay.Minimum, Math.Min(numDelay.Maximum, existingDelay));
+            numDelay.Value = Math.Max(numDelay.Minimum, Math.Min(numDelay.Maximum, existingDelay <= 0 ? 15 : existingDelay));
             if (string.Equals(existingUevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
                 radioNightly.Checked = true;
             else
                 radioRelease.Checked = true;
+            chkManual.Checked = existingManual;
+            WireManualToggle();
+        }
+
+        // Manual mode forces Release for the underlying chihuahua dir (only
+        // praydog 1.05 publishes a UEVRInjector frontend — there's no "nightly
+        // frontend" to pick). So when Manual is checked we grey out the Delay
+        // spinner AND the Release/Nightly radios, snapping the radio to
+        // Release so the saved wrapper is honest about what it'll actually run.
+        private void WireManualToggle()
+        {
+            chkManual.CheckedChanged += (s, e) => ApplyManualState();
+            ApplyManualState();
+        }
+
+        private void ApplyManualState()
+        {
+            bool manual = chkManual.Checked;
+            numDelay.Enabled = !manual;
+            radioRelease.Enabled = !manual;
+            radioNightly.Enabled = !manual;
+            if (manual) radioRelease.Checked = true;
         }
 
         protected override void OnLoad(EventArgs e)
@@ -141,6 +165,7 @@ namespace UevrLauncher
             ResultUevrBuild = radioNightly.Checked
                 ? WrapperIo.UevrBuildNightly
                 : WrapperIo.UevrBuildRelease;
+            ResultManualInjection = chkManual.Checked;
             DialogResult = DialogResult.OK;
             Close();
         }

@@ -54,6 +54,15 @@ namespace UevrLauncher.Services
         public static string ChihuahuaExePath(string dataRoot, string uevrBuild)
             => Path.Combine(ChihuahuaDir(dataRoot, uevrBuild), "chihuahua.exe");
 
+        // praydog's UEVR frontend, dropped into each mode's chihuahua dir
+        // alongside the runtime DLLs (which chihuahua manages itself).
+        public static string UevrInjectorExePath(string dataRoot, string uevrBuild)
+            => Path.Combine(ChihuahuaDir(dataRoot, uevrBuild), "UEVRInjector.exe");
+
+        public const string PraydogRepoOwner = "praydog";
+        public const string PraydogRepoName = "UEVR";
+        public const string PraydogAssetName = "UEVR.zip";
+
         // True only when BOTH modes are installed. We always install/uninstall
         // them as a pair so the GUI never has to expose "Nightly is missing"
         // as a state.
@@ -220,6 +229,11 @@ namespace UevrLauncher.Services
                 Directory.Move(releaseStage, releaseDir);
                 Directory.Move(nightlyStage, nightlyDir);
 
+                // Drop praydog's UEVRInjector.exe into both mode dirs so
+                // Manual-injection wrappers have a frontend to launch. SHA-256
+                // verified against praydog's published .sha256 sidecar.
+                FetchUevrInjector(dataRoot, onProgress);
+
                 var cfg = ConfigStore.LoadConfig(dataRoot);
                 cfg.Chihuahua.Tag = release.Tag;
                 cfg.Chihuahua.InstalledAt = DateTime.UtcNow.ToString("o");
@@ -281,6 +295,139 @@ namespace UevrLauncher.Services
         }
 
         // ----- Internals -----
+
+        // Download praydog/UEVR's latest release zip, verify its SHA-256
+        // against the sidecar published in the same release, then extract
+        // just UEVRInjector.exe into both mode dirs. The runtime DLLs are
+        // intentionally NOT pulled from this zip — chihuahua owns those, and
+        // for Nightly mode chihuahua will fetch a different (newer) set.
+        //
+        // Errors here are non-fatal for the chihuahua install: if praydog's
+        // release is unreachable, the user can still use auto-inject; only
+        // Manual-mode wrappers will fail at game-launch time (with the
+        // existing :no_chihuahua msgbox).
+        public static void FetchUevrInjector(string dataRoot, Action<long, long> onProgress = null)
+        {
+            EnsureTls12();
+
+            string apiUrl = $"https://api.github.com/repos/{PraydogRepoOwner}/{PraydogRepoName}/releases/latest";
+            string json;
+            try { json = HttpGetString(apiUrl); }
+            catch { return; }
+
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024 };
+            var rel = ser.Deserialize<GitHubRelease>(json);
+            if (rel?.assets == null) return;
+
+            GitHubAsset zipAsset = null;
+            GitHubAsset shaAsset = null;
+            foreach (var a in rel.assets)
+            {
+                if (string.Equals(a.name, PraydogAssetName, StringComparison.OrdinalIgnoreCase))
+                    zipAsset = a;
+                else if (string.Equals(a.name, PraydogAssetName + ".sha256", StringComparison.OrdinalIgnoreCase))
+                    shaAsset = a;
+            }
+            if (zipAsset == null) return;
+
+            string tmpZip = Path.Combine(dataRoot, "uevr-download.zip.tmp");
+            string stageDir = Path.Combine(dataRoot, "uevr-stage.tmp");
+            if (File.Exists(tmpZip)) File.Delete(tmpZip);
+            if (Directory.Exists(stageDir)) Directory.Delete(stageDir, true);
+
+            try
+            {
+                DownloadWithProgress(zipAsset.browser_download_url, tmpZip, zipAsset.size, onProgress);
+
+                if (new FileInfo(tmpZip).Length != zipAsset.size) return;
+
+                // Verify SHA-256 if praydog published one.
+                if (shaAsset != null)
+                {
+                    string expected;
+                    try { expected = HttpGetString(shaAsset.browser_download_url).Trim().Split(' ')[0]; }
+                    catch { expected = null; }
+
+                    if (!string.IsNullOrEmpty(expected))
+                    {
+                        string actual = ComputeSha256Hex(tmpZip);
+                        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new InvalidDataException(
+                                $"UEVR.zip SHA-256 mismatch: expected {expected}, got {actual}. Refusing to extract.");
+                        }
+                    }
+                }
+
+                Directory.CreateDirectory(stageDir);
+                SafeExtractZip(tmpZip, stageDir);
+
+                // Praydog's UEVR.zip contains the 1.05 frontend + matching
+                // runtime DLLs. We populate ONLY the Release-mode chihuahua
+                // dir — Nightly mode is owned by chihuahua's own fetcher (it
+                // tracks praydog's pre-release nightly tags), and dropping
+                // 1.05 DLLs into chihuahua-nightly\ would silently lie about
+                // which UEVR version is actually loaded. Manual-injection
+                // wrappers are now forced to use chihuahua-release\ (the only
+                // mode with a published frontend), so this layout serves both
+                // the auto-inject Release path and every Manual wrapper.
+                if (FindFile(stageDir, "UEVRInjector.exe") == null) return;
+
+                string releaseDir = ChihuahuaDir(dataRoot, WrapperIo.UevrBuildRelease);
+                Directory.CreateDirectory(releaseDir);
+
+                // Frontend: always overwrite. If praydog ships a new 1.x
+                // release, we want the latest frontend in place.
+                var frontendSrc = FindFile(stageDir, "UEVRInjector.exe");
+                if (frontendSrc != null)
+                    File.Copy(frontendSrc, Path.Combine(releaseDir, "UEVRInjector.exe"), overwrite: true);
+
+                // Runtime DLLs + version stamp: copy only when missing so a
+                // re-install doesn't revert a newer 1.x set fetched by
+                // chihuahua's own update logic.
+                string[] copyIfMissing =
+                {
+                    "UEVRBackend.dll",
+                    "UEVRPluginNullifier.dll",
+                    "openvr_api.dll",
+                    "openxr_loader.dll",
+                    "uevr.version",
+                };
+                foreach (var name in copyIfMissing)
+                {
+                    var dstFile = Path.Combine(releaseDir, name);
+                    if (File.Exists(dstFile)) continue;
+                    var src = FindFile(stageDir, name);
+                    if (src != null) File.Copy(src, dstFile);
+                }
+            }
+            finally
+            {
+                if (File.Exists(tmpZip)) { try { File.Delete(tmpZip); } catch { } }
+                if (Directory.Exists(stageDir)) { try { Directory.Delete(stageDir, true); } catch { } }
+            }
+        }
+
+        // Find a file by basename anywhere in a directory tree. praydog's
+        // UEVR.zip lays everything out flat at the root in current releases,
+        // but defending against future layout changes is cheap.
+        private static string FindFile(string root, string fileName)
+        {
+            var hits = Directory.GetFiles(root, fileName, SearchOption.AllDirectories);
+            return hits.Length > 0 ? hits[0] : null;
+        }
+
+        private static string ComputeSha256Hex(string path)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            using (var fs = File.OpenRead(path))
+            {
+                byte[] hash = sha.ComputeHash(fs);
+                var sb = new System.Text.StringBuilder(hash.Length * 2);
+                foreach (byte b in hash) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
 
         // Replacement for ZipFile.ExtractToDirectory that defends against
         // "zip-slip": malicious entries whose names resolve outside the

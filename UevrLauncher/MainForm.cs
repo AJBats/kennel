@@ -72,7 +72,9 @@ namespace UevrLauncher
             foreach (var w in WrapperIo.List(wrappersDir))
             {
                 var exe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, w.UevrBuild);
-                WrapperIo.Write(w.Basename, w.GameName, w.GameExePath, w.DelaySeconds, exe, w.UevrBuild, wrappersDir);
+                var injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, w.UevrBuild);
+                WrapperIo.Write(w.Basename, w.GameName, w.GameExePath, w.DelaySeconds,
+                    exe, w.UevrBuild, w.ManualInjection, injector, wrappersDir);
             }
         }
 
@@ -144,22 +146,24 @@ namespace UevrLauncher
 
             lblSteamWarning.Visible = steamRunning;
             lblSteamWarning.Text = steamRunning
-                ? "⚠  Steam is running — quit Steam to add, edit, or delete wrappers"
+                ? "⚠  Steam is running — quit Steam to add or delete wrappers"
                 : "";
 
             bool hasSelection = listWrappers.SelectedItems.Count > 0;
 
+            // Add and Delete write to Steam's localconfig.vdf, so they need
+            // Steam closed. Edit only rewrites our .bat (the Steam launch
+            // options string is unchanged) and stays enabled while Steam runs.
             btnAddGame.Enabled = chihuahuaOk && !steamRunning;
-            btnEdit.Enabled = hasSelection && chihuahuaOk && !steamRunning;
+            btnEdit.Enabled = hasSelection && chihuahuaOk;
             btnDelete.Enabled = hasSelection && !steamRunning;
 
-            // Tooltips explain *why* a button is disabled.
-            string blockReason = null;
-            if (steamRunning) blockReason = "Steam is running — quit Steam first";
-            else if (!chihuahuaOk) blockReason = "chihuahua is not installed";
+            string addReason = null;
+            if (steamRunning) addReason = "Steam is running — quit Steam first";
+            else if (!chihuahuaOk) addReason = "chihuahua is not installed";
 
-            toolTip.SetToolTip(btnAddGame, blockReason);
-            toolTip.SetToolTip(btnEdit, blockReason);
+            toolTip.SetToolTip(btnAddGame, addReason);
+            toolTip.SetToolTip(btnEdit, !chihuahuaOk ? "chihuahua is not installed" : null);
             toolTip.SetToolTip(btnDelete, steamRunning ? "Steam is running — quit Steam first" : null);
         }
 
@@ -182,10 +186,11 @@ namespace UevrLauncher
                 row.Status = ValidateRow(row);
                 _rows.Add(row);
 
+                string delayDisplay = w.ManualInjection ? "Manual" : w.DelaySeconds + "s";
                 var lv = new ListViewItem(new[]
                 {
                     w.GameName ?? w.Basename,
-                    w.DelaySeconds + "s",
+                    delayDisplay,
                     row.Status,
                 });
                 lv.Tag = row;
@@ -406,17 +411,17 @@ namespace UevrLauncher
                         InstallPath = "",
                     };
                 }
-                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds, existing.Wrapper.UevrBuild);
+                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds, existing.Wrapper.UevrBuild, existing.Wrapper.ManualInjection);
             }
 
             using (dlg)
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName, dlg.ResultUevrBuild);
+                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName, dlg.ResultUevrBuild, dlg.ResultManualInjection);
             }
         }
 
-        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName, string uevrBuild)
+        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName, string uevrBuild, bool manualInjection)
         {
             // Dialog only returns DialogResult.OK when a game is selected and
             // its exe exists; UpdateButtonGates blocks Add/Edit entry when
@@ -429,6 +434,22 @@ namespace UevrLauncher
                 ? existing.Wrapper.Basename
                 : MakeUniqueBasename(Slug.FromGameName(gameName ?? game.Name));
 
+            // Manual mode needs both UEVRInjector.exe AND the UEVR runtime
+            // DLLs (UEVRBackend.dll, …) next to it in the mode's chihuahua
+            // dir. The frontend can't inject without the backend DLL. If
+            // either is missing, fetch praydog's UEVR.zip now — the fetch is
+            // idempotent and will fill in whichever pieces are missing.
+            if (manualInjection)
+            {
+                var modeDir = ChihuahuaManager.ChihuahuaDir(_dataRoot, uevrBuild);
+                bool injectorMissing = !File.Exists(Path.Combine(modeDir, "UEVRInjector.exe"));
+                bool backendMissing = !File.Exists(Path.Combine(modeDir, "UEVRBackend.dll"));
+                if (injectorMissing || backendMissing)
+                {
+                    if (!FetchUevrInjectorWithProgress()) return;
+                }
+            }
+
             try
             {
                 var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
@@ -436,13 +457,23 @@ namespace UevrLauncher
                 // a wrapper between Release and Nightly doesn't force chihuahua
                 // to redownload UEVR DLLs — each install stays warm.
                 var chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, uevrBuild);
+                var injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, uevrBuild);
 
-                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, wrappersDir);
+                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, manualInjection, injector, wrappersDir);
 
-                var launchOpts = WrapperIo.BuildSteamLaunchOptions(basename, wrappersDir);
-                var user = SteamConfig.FindActiveUser();
-                if (user == null) throw new InvalidOperationException("No Steam user found.");
-                SteamConfig.SetLaunchOptions(user, game.AppId, launchOpts);
+                // Edit-mode partial save: the Steam launch options string for a
+                // wrapper is just the path to its .vbs, and we never change
+                // basename on Edit. So the existing Steam entry is already
+                // correct and we can skip the localconfig.vdf write entirely.
+                // That lets Edit succeed even with Steam running.
+                bool needsSteamWrite = existing == null;
+                if (needsSteamWrite)
+                {
+                    var launchOpts = WrapperIo.BuildSteamLaunchOptions(basename, wrappersDir);
+                    var user = SteamConfig.FindActiveUser();
+                    if (user == null) throw new InvalidOperationException("No Steam user found.");
+                    SteamConfig.SetLaunchOptions(user, game.AppId, launchOpts);
+                }
 
                 // Update or insert the basename↔appid registry entry.
                 var reg = _config.Wrappers.FirstOrDefault(w =>
@@ -460,6 +491,57 @@ namespace UevrLauncher
             }
 
             RefreshAll();
+        }
+
+        // Synchronous-feeling wrapper around ChihuahuaManager.FetchUevrInjector.
+        // Shows the same progress UI as the chihuahua install, runs the
+        // network IO on a worker thread, returns false on failure so the
+        // calling save flow can abort.
+        private bool FetchUevrInjectorWithProgress()
+        {
+            using (var progress = new ChihuahuaProgressForm())
+            {
+                progress.SetHeader("Downloading UEVR frontend…");
+                progress.Show(this);
+                bool ok = false;
+                Exception err = null;
+                var done = new System.Threading.ManualResetEventSlim(false);
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        ChihuahuaManager.FetchUevrInjector(_dataRoot, (cur, total) =>
+                        {
+                            try
+                            {
+                                if (progress.IsHandleCreated)
+                                    progress.BeginInvoke((MethodInvoker)(() => progress.Report(cur, total)));
+                            }
+                            catch (ObjectDisposedException) { }
+                            catch (InvalidOperationException) { }
+                        });
+                        ok = true;
+                    }
+                    catch (Exception ex) { err = ex; }
+                    finally { done.Set(); }
+                });
+                while (!done.IsSet) { Application.DoEvents(); System.Threading.Thread.Sleep(30); }
+                if (progress.IsHandleCreated) progress.Close();
+                if (err != null)
+                {
+                    MessageBox.Show(this, "Couldn't fetch UEVR frontend: " + err.Message,
+                        "UEVR frontend", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return false;
+                }
+                if (!File.Exists(ChihuahuaManager.UevrInjectorExePath(_dataRoot, WrapperIo.UevrBuildRelease)))
+                {
+                    MessageBox.Show(this,
+                        "UEVR frontend download completed but UEVRInjector.exe wasn't found in the zip.",
+                        "UEVR frontend", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return false;
+                }
+                return ok;
+            }
         }
 
         // If the slug already exists in this wrappers dir, suffix -2, -3, …

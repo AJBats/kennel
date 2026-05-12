@@ -15,6 +15,7 @@ namespace UevrLauncher
         private System.Windows.Forms.Label lblDelay;
         private System.Windows.Forms.NumericUpDown numDelay;
         private System.Windows.Forms.Label lblDelayUnit;
+        private System.Windows.Forms.CheckBox chkManual;
         private System.Windows.Forms.Label lblUevrBuild;
         private System.Windows.Forms.RadioButton radioRelease;
         private System.Windows.Forms.RadioButton radioNightly;
@@ -40,6 +41,7 @@ namespace UevrLauncher
             this.lblDelay = new System.Windows.Forms.Label();
             this.numDelay = new System.Windows.Forms.NumericUpDown();
             this.lblDelayUnit = new System.Windows.Forms.Label();
+            this.chkManual = new System.Windows.Forms.CheckBox();
             this.lblUevrBuild = new System.Windows.Forms.Label();
             this.radioRelease = new System.Windows.Forms.RadioButton();
             this.radioNightly = new System.Windows.Forms.RadioButton();
@@ -107,6 +109,11 @@ namespace UevrLauncher
             this.lblDelayUnit.Location = new System.Drawing.Point(190, 336);
             this.lblDelayUnit.Text = "seconds";
 
+            this.chkManual.AutoSize = true;
+            this.chkManual.Location = new System.Drawing.Point(300, 335);
+            this.chkManual.Text = "Manual injection";
+            this.chkManual.UseVisualStyleBackColor = true;
+
             this.lblUevrBuild.AutoSize = true;
             this.lblUevrBuild.Location = new System.Drawing.Point(16, 374);
             this.lblUevrBuild.Text = "UEVR build:";
@@ -147,6 +154,7 @@ namespace UevrLauncher
             this.Controls.Add(this.lblDelay);
             this.Controls.Add(this.numDelay);
             this.Controls.Add(this.lblDelayUnit);
+            this.Controls.Add(this.chkManual);
             this.Controls.Add(this.lblUevrBuild);
             this.Controls.Add(this.radioRelease);
             this.Controls.Add(this.radioNightly);
