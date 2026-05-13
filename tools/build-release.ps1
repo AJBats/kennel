@@ -46,6 +46,7 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 Copy-Item (Join-Path $binDir "Kennel.exe")        $stageDir
 Copy-Item (Join-Path $binDir "Kennel.exe.config") $stageDir
 Copy-Item (Join-Path $repoRoot "README.md")       $stageDir
+Copy-Item (Join-Path $repoRoot "UNLICENSE")       $stageDir
 
 Write-Host "==> Compressing $zipPath"
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
