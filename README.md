@@ -74,9 +74,17 @@ dotnet build UevrLauncher\UevrLauncher.csproj
 
 Output: `UevrLauncher\bin\Debug\net48\Kennel.exe`.
 
-## Credits
+## Acknowledgements
 
-Kennel is the launcher orchestration. The actual VR magic is praydog's UEVR; the injection is keton's chihuahua. Without either of those projects, Kennel wouldn't have anything to wrap.
+Please consider supporting [praydog](https://www.patreon.com/praydog), without him none of this would be possible.
+
+Particular thanks also goes to [chihuahua](https://github.com/keton/chihuahua), which inspired this project and serves as the backend for Kennel.
+
+- [praydog on Patreon](https://www.patreon.com/praydog)
+- [UEVR on GitHub](https://github.com/praydog/UEVR)
+- [UEVR documentation](https://uevr.io)
+- [chihuahua](https://github.com/keton/chihuahua) injector by [keton](https://github.com/keton)
+- [Flat2VR Discord](https://discord.com/invite/ZFSCSDe)
 
 ## License
 
