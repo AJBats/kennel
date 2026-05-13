@@ -28,6 +28,23 @@ namespace UevrLauncher
         {
             _dataRoot = dataRoot;
             InitializeComponent();
+            var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            this.Text = $"Kennel v{v.Major}.{v.Minor}.{v.Build}";
+
+            // Load the app icon for the title bar from the embedded resource.
+            // (ApplicationIcon in the csproj covers Explorer/Task Manager; the
+            // Form's own Icon is a separate property.)
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            var iconResource = System.Array.Find(
+                asm.GetManifestResourceNames(),
+                n => n.EndsWith(".kennel.ico", System.StringComparison.Ordinal));
+            if (iconResource != null)
+            {
+                using (var stream = asm.GetManifestResourceStream(iconResource))
+                {
+                    if (stream != null) this.Icon = new System.Drawing.Icon(stream);
+                }
+            }
         }
 
         protected override void OnLoad(EventArgs e)

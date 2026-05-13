@@ -1,6 +1,7 @@
 bin/
 obj/
 _probe/
+release/
 *.user
 .vs/
 *.suo

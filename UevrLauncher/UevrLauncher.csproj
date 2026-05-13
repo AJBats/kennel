@@ -12,7 +12,8 @@
     <AssemblyTitle>Kennel</AssemblyTitle>
     <Description>UEVR launcher manager for Steam</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
+    <ApplicationIcon>Resources\kennel.ico</ApplicationIcon>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -26,6 +27,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Templates\smart_wrap.bat.tmpl" />
     <EmbeddedResource Include="Templates\smart_wrap.vbs.tmpl" />
+    <EmbeddedResource Include="Resources\kennel.ico" />
   </ItemGroup>
 
 </Project>
