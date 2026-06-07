@@ -9,7 +9,7 @@ Steam doesn't know the difference. The same Library entry just does the right th
 
 ## Install
 
-1. Download `Kennel-v1.0.0.zip` from the [Releases](https://github.com/AJBats/kennel/releases) page.
+1. Download the latest `Kennel-v*.zip` from the [Releases](https://github.com/AJBats/kennel/releases) page.
 2. Extract anywhere you like (e.g. a folder on your desktop).
 3. Double-click `Kennel.exe`.
 
