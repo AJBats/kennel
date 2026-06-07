@@ -19,6 +19,10 @@ namespace UevrLauncher
         private System.Windows.Forms.Label lblUevrBuild;
         private System.Windows.Forms.RadioButton radioRelease;
         private System.Windows.Forms.RadioButton radioNightly;
+        private System.Windows.Forms.RadioButton radioCustom;
+        private System.Windows.Forms.Label lblCustomPath;
+        private System.Windows.Forms.TextBox txtCustomPath;
+        private System.Windows.Forms.Button btnBrowseCustom;
         private System.Windows.Forms.Button btnOk;
         private System.Windows.Forms.Button btnCancel;
 
@@ -45,6 +49,10 @@ namespace UevrLauncher
             this.lblUevrBuild = new System.Windows.Forms.Label();
             this.radioRelease = new System.Windows.Forms.RadioButton();
             this.radioNightly = new System.Windows.Forms.RadioButton();
+            this.radioCustom = new System.Windows.Forms.RadioButton();
+            this.lblCustomPath = new System.Windows.Forms.Label();
+            this.txtCustomPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseCustom = new System.Windows.Forms.Button();
             this.btnOk = new System.Windows.Forms.Button();
             this.btnCancel = new System.Windows.Forms.Button();
 
@@ -128,14 +136,35 @@ namespace UevrLauncher
             this.radioNightly.Text = "Nightly";
             this.radioNightly.UseVisualStyleBackColor = true;
 
-            this.btnOk.Location = new System.Drawing.Point(416, 414);
+            this.radioCustom.AutoSize = true;
+            this.radioCustom.Location = new System.Drawing.Point(272, 372);
+            this.radioCustom.Text = "Custom";
+            this.radioCustom.UseVisualStyleBackColor = true;
+
+            this.lblCustomPath.AutoSize = true;
+            this.lblCustomPath.Location = new System.Drawing.Point(16, 406);
+            this.lblCustomPath.Text = "Custom dir:";
+            this.lblCustomPath.Visible = false;
+
+            this.txtCustomPath.Location = new System.Drawing.Point(96, 403);
+            this.txtCustomPath.Size = new System.Drawing.Size(420, 23);
+            this.txtCustomPath.Visible = false;
+
+            this.btnBrowseCustom.Location = new System.Drawing.Point(522, 401);
+            this.btnBrowseCustom.Size = new System.Drawing.Size(75, 26);
+            this.btnBrowseCustom.Text = "Browse…";
+            this.btnBrowseCustom.UseVisualStyleBackColor = true;
+            this.btnBrowseCustom.Visible = false;
+            this.btnBrowseCustom.Click += new System.EventHandler(this.btnBrowseCustom_Click);
+
+            this.btnOk.Location = new System.Drawing.Point(416, 444);
             this.btnOk.Size = new System.Drawing.Size(85, 28);
             this.btnOk.Text = "OK";
             this.btnOk.Enabled = false;
             this.btnOk.UseVisualStyleBackColor = true;
             this.btnOk.Click += new System.EventHandler(this.btnOk_Click);
 
-            this.btnCancel.Location = new System.Drawing.Point(510, 414);
+            this.btnCancel.Location = new System.Drawing.Point(510, 444);
             this.btnCancel.Size = new System.Drawing.Size(85, 28);
             this.btnCancel.Text = "Cancel";
             this.btnCancel.UseVisualStyleBackColor = true;
@@ -143,7 +172,7 @@ namespace UevrLauncher
 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(614, 460);
+            this.ClientSize = new System.Drawing.Size(614, 490);
             this.Controls.Add(this.lblSearch);
             this.Controls.Add(this.txtSearch);
             this.Controls.Add(this.listGames);
@@ -158,6 +187,10 @@ namespace UevrLauncher
             this.Controls.Add(this.lblUevrBuild);
             this.Controls.Add(this.radioRelease);
             this.Controls.Add(this.radioNightly);
+            this.Controls.Add(this.radioCustom);
+            this.Controls.Add(this.lblCustomPath);
+            this.Controls.Add(this.txtCustomPath);
+            this.Controls.Add(this.btnBrowseCustom);
             this.Controls.Add(this.btnOk);
             this.Controls.Add(this.btnCancel);
             this.AcceptButton = this.btnOk;

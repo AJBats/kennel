@@ -88,10 +88,19 @@ namespace UevrLauncher
             var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
             foreach (var w in WrapperIo.List(wrappersDir))
             {
-                var exe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, w.UevrBuild);
-                var injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, w.UevrBuild);
+                string exe, injector;
+                if (w.UevrBuild == WrapperIo.UevrBuildCustom && !string.IsNullOrEmpty(w.CustomUevrDir))
+                {
+                    exe = Path.Combine(w.CustomUevrDir, "chihuahua.exe");
+                    injector = Path.Combine(w.CustomUevrDir, "UEVRInjector.exe");
+                }
+                else
+                {
+                    exe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, w.UevrBuild);
+                    injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, w.UevrBuild);
+                }
                 WrapperIo.Write(w.Basename, w.GameName, w.GameExePath, w.DelaySeconds,
-                    exe, w.UevrBuild, w.ManualInjection, injector, wrappersDir);
+                    exe, w.UevrBuild, w.ManualInjection, injector, w.CustomUevrDir, wrappersDir);
             }
         }
 
@@ -203,7 +212,14 @@ namespace UevrLauncher
                 row.Status = ValidateRow(row);
                 _rows.Add(row);
 
-                string delayDisplay = w.ManualInjection ? "Manual" : w.DelaySeconds + "s";
+                // Custom mode shows the delay seconds like normal — the status
+                // column already disambiguates Custom from Auto. Manual mode
+                // without Custom shows "Manual" since the delay is genuinely
+                // unused in that case and there's no other column saying so.
+                bool isCustom = string.Equals(w.UevrBuild, WrapperIo.UevrBuildCustom, StringComparison.OrdinalIgnoreCase);
+                string delayDisplay = (w.ManualInjection && !isCustom)
+                    ? "Manual"
+                    : w.DelaySeconds + "s";
                 var lv = new ListViewItem(new[]
                 {
                     w.GameName ?? w.Basename,
@@ -221,11 +237,37 @@ namespace UevrLauncher
 
         private string ValidateRow(WrapperRow row)
         {
-            string suffix = string.Equals(row.Wrapper.UevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
-                ? "  (nightly)"
-                : "";
+            string suffix = "";
+            if (string.Equals(row.Wrapper.UevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+                suffix = "  (nightly)";
+            else if (string.Equals(row.Wrapper.UevrBuild, WrapperIo.UevrBuildCustom, StringComparison.OrdinalIgnoreCase))
+                suffix = "  (custom)";
+
             if (!File.Exists(row.Wrapper.GameExePath)) return "⚠ exe missing" + suffix;
-            if (!ChihuahuaManager.IsInstalled(_dataRoot)) return "⚠ no chihuahua" + suffix;
+            // Custom wrappers point at the user's UEVR dir. Manual flow needs
+            // UEVRInjector.exe + UEVRBackend.dll; auto-inject flow needs
+            // chihuahua.exe + UEVRBackend.dll. Either way UEVRBackend.dll has
+            // to be there — that's the actual injected runtime.
+            if (string.Equals(row.Wrapper.UevrBuild, WrapperIo.UevrBuildCustom, StringComparison.OrdinalIgnoreCase))
+            {
+                var d = row.Wrapper.CustomUevrDir;
+                if (string.IsNullOrEmpty(d) || !File.Exists(Path.Combine(d, "UEVRBackend.dll")))
+                    return "⚠ custom UEVR missing" + suffix;
+                if (row.Wrapper.ManualInjection)
+                {
+                    if (!File.Exists(Path.Combine(d, "UEVRInjector.exe")))
+                        return "⚠ custom UEVR missing" + suffix;
+                }
+                else
+                {
+                    if (!File.Exists(Path.Combine(d, "chihuahua.exe")))
+                        return "⚠ chihuahua not in custom dir" + suffix;
+                }
+            }
+            else
+            {
+                if (!ChihuahuaManager.IsInstalled(_dataRoot)) return "⚠ no chihuahua" + suffix;
+            }
             if (string.IsNullOrEmpty(row.AppId)) return "⚠ no Steam link" + suffix;
             return "✓ valid" + suffix;
         }
@@ -428,17 +470,17 @@ namespace UevrLauncher
                         InstallPath = "",
                     };
                 }
-                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds, existing.Wrapper.UevrBuild, existing.Wrapper.ManualInjection);
+                dlg = new AddGameForm(existingGame, existing.Wrapper.GameExePath, existing.Wrapper.DelaySeconds, existing.Wrapper.UevrBuild, existing.Wrapper.ManualInjection, existing.Wrapper.CustomUevrDir);
             }
 
             using (dlg)
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName, dlg.ResultUevrBuild, dlg.ResultManualInjection);
+                CommitWrapper(existing, dlg.SelectedGame, dlg.ResultExePath, dlg.ResultDelaySeconds, dlg.ResultGameName, dlg.ResultUevrBuild, dlg.ResultManualInjection, dlg.ResultCustomUevrDir);
             }
         }
 
-        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName, string uevrBuild, bool manualInjection)
+        private void CommitWrapper(WrapperRow existing, SteamGame game, string exePath, int delay, string gameName, string uevrBuild, bool manualInjection, string customUevrDir)
         {
             // Dialog only returns DialogResult.OK when a game is selected and
             // its exe exists; UpdateButtonGates blocks Add/Edit entry when
@@ -452,11 +494,10 @@ namespace UevrLauncher
                 : MakeUniqueBasename(Slug.FromGameName(gameName ?? game.Name));
 
             // Manual mode needs both UEVRInjector.exe AND the UEVR runtime
-            // DLLs (UEVRBackend.dll, …) next to it in the mode's chihuahua
-            // dir. The frontend can't inject without the backend DLL. If
-            // either is missing, fetch praydog's UEVR.zip now — the fetch is
-            // idempotent and will fill in whichever pieces are missing.
-            if (manualInjection)
+            // DLLs next to it. Custom mode supplies its own; for other Manual
+            // wrappers we lazy-fetch praydog's release zip into chihuahua-
+            // release\ if anything is missing.
+            if (manualInjection && uevrBuild != WrapperIo.UevrBuildCustom)
             {
                 var modeDir = ChihuahuaManager.ChihuahuaDir(_dataRoot, uevrBuild);
                 bool injectorMissing = !File.Exists(Path.Combine(modeDir, "UEVRInjector.exe"));
@@ -467,16 +508,41 @@ namespace UevrLauncher
                 }
             }
 
+            // Custom-mode auto-inject needs chihuahua.exe co-located with the
+            // user's custom UEVR DLLs so chihuahua loads the custom DLLs from
+            // its own dir. If it's not already there, offer to copy it from
+            // chihuahua-release\ (or chihuahua-nightly\ as fallback).
+            if (uevrBuild == WrapperIo.UevrBuildCustom && !string.IsNullOrEmpty(customUevrDir))
+            {
+                var dstChihuahua = Path.Combine(customUevrDir, "chihuahua.exe");
+                if (!File.Exists(dstChihuahua))
+                {
+                    if (!CopyChihuahuaIntoCustomDir(customUevrDir)) return;
+                }
+            }
+
             try
             {
                 var wrappersDir = ConfigStore.WrappersDir(_dataRoot);
                 // Each wrapper points at its mode-specific chihuahua so toggling
                 // a wrapper between Release and Nightly doesn't force chihuahua
                 // to redownload UEVR DLLs — each install stays warm.
-                var chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, uevrBuild);
-                var injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, uevrBuild);
+                // Custom mode points at chihuahua + UEVRInjector inside the
+                // user's custom UEVR dir, both co-located with the custom DLLs.
+                string chihuahuaExe;
+                string injector;
+                if (uevrBuild == WrapperIo.UevrBuildCustom && !string.IsNullOrEmpty(customUevrDir))
+                {
+                    chihuahuaExe = Path.Combine(customUevrDir, "chihuahua.exe");
+                    injector = Path.Combine(customUevrDir, "UEVRInjector.exe");
+                }
+                else
+                {
+                    chihuahuaExe = ChihuahuaManager.ChihuahuaExePath(_dataRoot, uevrBuild);
+                    injector = ChihuahuaManager.UevrInjectorExePath(_dataRoot, uevrBuild);
+                }
 
-                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, manualInjection, injector, wrappersDir);
+                WrapperIo.Write(basename, gameName ?? game.Name, exePath, delay, chihuahuaExe, uevrBuild, manualInjection, injector, customUevrDir, wrappersDir);
 
                 // Edit-mode partial save: the Steam launch options string for a
                 // wrapper is just the path to its .vbs, and we never change
@@ -508,6 +574,57 @@ namespace UevrLauncher
             }
 
             RefreshAll();
+        }
+
+        // Copies chihuahua.exe + sidecars from the managed chihuahua-release\
+        // into the user's custom UEVR dir so chihuahua runs co-located with
+        // the user's UEVR DLLs. Also removes any uevr.version file in that
+        // dir — chihuahua's update path treats an empty/missing version as
+        // "no comparison" and skips the download condition, preventing it
+        // from overwriting the user's DLLs.
+        //
+        // Returns false if the user declines or the copy fails; caller should
+        // abort the save in that case.
+        private bool CopyChihuahuaIntoCustomDir(string customDir)
+        {
+            var sourceDir = ChihuahuaManager.ChihuahuaDir(_dataRoot, WrapperIo.UevrBuildRelease);
+            var sourceExe = Path.Combine(sourceDir, "chihuahua.exe");
+            if (!File.Exists(sourceExe))
+            {
+                MessageBox.Show(this,
+                    "chihuahua isn't installed yet. Install it first from the main window.",
+                    "Custom UEVR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            var r = MessageBox.Show(this,
+                "Custom-mode auto-inject needs chihuahua.exe sitting next to your UEVR DLLs.\n\n" +
+                "OK to copy chihuahua.exe (plus chihuahua.pdb and rai-pal-manifest.json) into:\n\n" +
+                "  " + customDir + "\n\n" +
+                "Any uevr.version file in that dir will also be removed so chihuahua doesn't try to upgrade your custom DLLs.",
+                "Set up custom chihuahua", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+            if (r != DialogResult.OK) return false;
+
+            try
+            {
+                foreach (var name in new[] { "chihuahua.exe", "chihuahua.pdb", "rai-pal-manifest.json" })
+                {
+                    var src = Path.Combine(sourceDir, name);
+                    var dst = Path.Combine(customDir, name);
+                    if (File.Exists(src) && !File.Exists(dst))
+                        File.Copy(src, dst);
+                }
+                var stale = Path.Combine(customDir, "uevr.version");
+                if (File.Exists(stale)) File.Delete(stale);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Couldn't set up custom chihuahua: " + ex.Message,
+                    "Custom UEVR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
         }
 
         // Synchronous-feeling wrapper around ChihuahuaManager.FetchUevrInjector.

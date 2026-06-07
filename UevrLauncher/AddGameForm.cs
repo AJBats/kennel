@@ -20,8 +20,9 @@ namespace UevrLauncher
         public string ResultExePath { get; private set; }
         public int ResultDelaySeconds { get; private set; }
         public string ResultGameName { get; private set; }
-        public string ResultUevrBuild { get; private set; }    // "Release" or "Nightly"
+        public string ResultUevrBuild { get; private set; }    // "Release", "Nightly", or "Custom"
         public bool ResultManualInjection { get; private set; }
+        public string ResultCustomUevrDir { get; private set; }
 
         // Add mode.
         public AddGameForm()
@@ -29,43 +30,74 @@ namespace UevrLauncher
             _editMode = false;
             InitializeComponent();
             radioRelease.Checked = true;
-            WireManualToggle();
+            WireBuildToggle();
         }
 
         // Edit mode: lock in the existing game, pre-fill fields.
-        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay, string existingUevrBuild, bool existingManual)
+        public AddGameForm(SteamGame existingGame, string existingExe, int existingDelay, string existingUevrBuild, bool existingManual, string existingCustomUevrDir)
         {
             _editMode = true;
             InitializeComponent();
             SelectedGame = existingGame;
             txtExePath.Text = existingExe ?? "";
             numDelay.Value = Math.Max(numDelay.Minimum, Math.Min(numDelay.Maximum, existingDelay <= 0 ? 15 : existingDelay));
-            if (string.Equals(existingUevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(existingUevrBuild, WrapperIo.UevrBuildCustom, StringComparison.OrdinalIgnoreCase))
+                radioCustom.Checked = true;
+            else if (string.Equals(existingUevrBuild, WrapperIo.UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
                 radioNightly.Checked = true;
             else
                 radioRelease.Checked = true;
             chkManual.Checked = existingManual;
-            WireManualToggle();
+            txtCustomPath.Text = existingCustomUevrDir ?? "";
+            WireBuildToggle();
         }
 
-        // Manual mode forces Release for the underlying chihuahua dir (only
-        // praydog 1.05 publishes a UEVRInjector frontend — there's no "nightly
-        // frontend" to pick). So when Manual is checked we grey out the Delay
-        // spinner AND the Release/Nightly radios, snapping the radio to
-        // Release so the saved wrapper is honest about what it'll actually run.
-        private void WireManualToggle()
+        // Build/Manual state interlock.
+        //
+        // Two invariants:
+        //   1. Manual without Custom ⇒ Release (only praydog's tagged release
+        //      ships a UEVRInjector frontend).
+        //   2. Custom ⇒ Manual (chihuahua can't be told to use a user-supplied
+        //      DLL set; we go through the user's own UEVRInjector.exe).
+        //
+        // The UI reflects this by greying out controls so the user can't
+        // configure an impossible combination.
+        private void WireBuildToggle()
         {
-            chkManual.CheckedChanged += (s, e) => ApplyManualState();
-            ApplyManualState();
+            chkManual.CheckedChanged += (s, e) => ApplyBuildState();
+            radioRelease.CheckedChanged += (s, e) => ApplyBuildState();
+            radioNightly.CheckedChanged += (s, e) => ApplyBuildState();
+            radioCustom.CheckedChanged += (s, e) => ApplyBuildState();
+            txtCustomPath.TextChanged += (s, e) => UpdateOkEnabled();
+            ApplyBuildState();
         }
 
-        private void ApplyManualState()
+        private void ApplyBuildState()
         {
+            bool custom = radioCustom.Checked;
             bool manual = chkManual.Checked;
+
+            // Custom shows the path row; others hide it. Custom is independent
+            // of Manual: with Manual=off we'll auto-inject the custom UEVR DLLs
+            // via a chihuahua.exe co-located in the custom dir; with Manual=on
+            // we'll launch the custom UEVRInjector.exe and the user injects.
+            lblCustomPath.Visible = custom;
+            txtCustomPath.Visible = custom;
+            btnBrowseCustom.Visible = custom;
+
+            // Delay is meaningless in Manual mode (chihuahua isn't called).
             numDelay.Enabled = !manual;
-            radioRelease.Enabled = !manual;
-            radioNightly.Enabled = !manual;
-            if (manual) radioRelease.Checked = true;
+
+            // Manual-without-Custom forces Release and disables Nightly (no
+            // nightly frontend exists). Custom + Manual still uses the custom
+            // dir's frontend, so it stays available.
+            radioRelease.Enabled = true;
+            radioCustom.Enabled = true;
+            radioNightly.Enabled = !(manual && !custom);
+            if (manual && !custom && !radioRelease.Checked && !radioCustom.Checked)
+                radioRelease.Checked = true;
+
+            UpdateOkEnabled();
         }
 
         protected override void OnLoad(EventArgs e)
@@ -154,7 +186,32 @@ namespace UevrLauncher
             bool ok = SelectedGame != null
                 && !string.IsNullOrWhiteSpace(txtExePath.Text)
                 && File.Exists(txtExePath.Text);
+
+            // Custom mode also requires a path to a dir containing UEVRInjector.exe.
+            if (ok && radioCustom != null && radioCustom.Checked)
+            {
+                var dir = txtCustomPath.Text?.Trim();
+                ok = !string.IsNullOrEmpty(dir)
+                    && Directory.Exists(dir)
+                    && File.Exists(Path.Combine(dir, "UEVRInjector.exe"));
+            }
+
             btnOk.Enabled = ok;
+        }
+
+        private void btnBrowseCustom_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                fbd.Description = "Pick your custom UEVR install directory (must contain UEVRInjector.exe).";
+                if (!string.IsNullOrEmpty(txtCustomPath.Text) && Directory.Exists(txtCustomPath.Text))
+                    fbd.SelectedPath = txtCustomPath.Text;
+                if (fbd.ShowDialog(this) == DialogResult.OK)
+                {
+                    txtCustomPath.Text = fbd.SelectedPath;
+                    UpdateOkEnabled();
+                }
+            }
         }
 
         private void btnOk_Click(object sender, EventArgs e)
@@ -162,10 +219,14 @@ namespace UevrLauncher
             ResultExePath = txtExePath.Text.Trim();
             ResultDelaySeconds = (int)numDelay.Value;
             ResultGameName = SelectedGame?.Name;
-            ResultUevrBuild = radioNightly.Checked
-                ? WrapperIo.UevrBuildNightly
-                : WrapperIo.UevrBuildRelease;
+
+            if (radioCustom.Checked) ResultUevrBuild = WrapperIo.UevrBuildCustom;
+            else if (radioNightly.Checked) ResultUevrBuild = WrapperIo.UevrBuildNightly;
+            else ResultUevrBuild = WrapperIo.UevrBuildRelease;
+
             ResultManualInjection = chkManual.Checked;
+            ResultCustomUevrDir = radioCustom.Checked ? txtCustomPath.Text.Trim() : null;
+
             DialogResult = DialogResult.OK;
             Close();
         }

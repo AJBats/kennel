@@ -12,7 +12,7 @@
     <AssemblyTitle>Kennel</AssemblyTitle>
     <Description>UEVR launcher manager for Steam</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <ApplicationIcon>Resources\kennel.ico</ApplicationIcon>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

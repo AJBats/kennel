@@ -5,6 +5,7 @@ REM Kennel-GameExe={{GameExe}}
 REM Kennel-Delay={{Delay}}
 REM Kennel-UevrBuild={{UevrBuild}}
 REM Kennel-Manual={{Manual}}
+REM Kennel-CustomUevrDir={{CustomUevrDir}}
 setlocal
 tasklist /FI "IMAGENAME eq vrserver.exe" 2>NUL | find /I "vrserver.exe" >NUL
 if "%ERRORLEVEL%"=="0" goto :vr

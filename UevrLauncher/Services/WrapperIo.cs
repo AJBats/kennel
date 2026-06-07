@@ -25,6 +25,7 @@ namespace UevrLauncher.Services
 
         public const string UevrBuildRelease = "Release";
         public const string UevrBuildNightly = "Nightly";
+        public const string UevrBuildCustom = "Custom";
 
         public static void Write(
             string basename,
@@ -32,19 +33,28 @@ namespace UevrLauncher.Services
             string gameExePath,
             int delaySeconds,
             string chihuahuaExePath,
-            string uevrBuild,        // "Release" or "Nightly"
+            string uevrBuild,        // "Release", "Nightly", or "Custom"
             bool manualInjection,
             string uevrInjectorExePath,  // path to UEVRInjector.exe matching uevrBuild (only used when manualInjection)
+            string customUevrDir,        // user-supplied UEVR install dir; only set when uevrBuild == "Custom"
             string wrappersDir)
         {
             ValidateBasename(basename);
             Directory.CreateDirectory(wrappersDir);
 
-            // Defensive normalize: chihuahua only accepts these two literals.
-            string normalizedBuild =
-                string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
-                    ? UevrBuildNightly
-                    : UevrBuildRelease;
+            // Defensive normalize: chihuahua only accepts Release/Nightly.
+            // Custom is Kennel's extension and always implies Manual.
+            string normalizedBuild;
+            if (string.Equals(uevrBuild, UevrBuildCustom, StringComparison.OrdinalIgnoreCase))
+                normalizedBuild = UevrBuildCustom;
+            else if (string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+                normalizedBuild = UevrBuildNightly;
+            else
+                normalizedBuild = UevrBuildRelease;
+
+            // Custom path means Custom build; force-clear otherwise so the
+            // metadata can't lie.
+            if (normalizedBuild != UevrBuildCustom) customUevrDir = null;
 
             string batPath = BatPathFor(basename, wrappersDir);
             string vbsPath = VbsPathFor(basename, wrappersDir);
@@ -59,6 +69,7 @@ namespace UevrLauncher.Services
                 .Replace("{{Delay}}", delaySeconds.ToString())
                 .Replace("{{UevrBuild}}", normalizedBuild)
                 .Replace("{{Manual}}", manualInjection ? "true" : "false")
+                .Replace("{{CustomUevrDir}}", customUevrDir ?? "")
                 .Replace("{{VrBlock}}", vrBlock);
 
             string vbs = LoadTemplate("smart_wrap.vbs.tmpl")
@@ -71,9 +82,19 @@ namespace UevrLauncher.Services
 
         // chihuahua auto-injection block. Falls through to :no_chihuahua if the
         // exe is missing; chihuahua handles UEVR DLL download + injection.
+        //
+        // chihuahua's CLI only accepts Release or Nightly for --uevr-build.
+        // "Custom" is a Kennel-side concept that means "chihuahua is co-located
+        // with user-supplied DLLs in their custom dir, no managed update
+        // path." For chihuahua's purposes, that's effectively Release (the
+        // flag is a no-op when uevr.version is missing — the AND condition in
+        // chihuahua's update logic short-circuits).
         private static string BuildChihuahuaVrBlock(
             string chihuahuaExePath, string gameExePath, int delaySeconds, string uevrBuild)
         {
+            string chihuahuaFlag = string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase)
+                ? UevrBuildNightly
+                : UevrBuildRelease;
             return string.Join("\n", new[]
             {
                 "if not exist \"" + chihuahuaExePath + "\" goto :no_chihuahua",
@@ -82,7 +103,7 @@ namespace UevrLauncher.Services
                 " \"" + gameExePath + "\" ^",
                 " --delay " + delaySeconds + " ^",
                 " --runtime OpenXR ^",
-                " --uevr-build " + uevrBuild,
+                " --uevr-build " + chihuahuaFlag,
                 "exit /b %ERRORLEVEL%",
             });
         }
@@ -134,6 +155,8 @@ namespace UevrLauncher.Services
             string delayStr = MatchOrNull(bat, @"^REM Kennel-Delay=(\d+)", RegexOptions.Multiline);
             string uevrBuild = MatchOrNull(bat, @"^REM Kennel-UevrBuild=(\w+)", RegexOptions.Multiline);
             string manualStr = MatchOrNull(bat, @"^REM Kennel-Manual=(true|false)", RegexOptions.Multiline);
+            string customUevrDir = MatchOrNull(bat, @"^REM Kennel-CustomUevrDir=([^\r\n]*)", RegexOptions.Multiline);
+            if (string.IsNullOrEmpty(customUevrDir)) customUevrDir = null;
 
             // Legacy fallback — pre-metadata wrappers had values only in the
             // chihuahua command line.
@@ -153,16 +176,26 @@ namespace UevrLauncher.Services
             }
 
             int delay = int.TryParse(delayStr, out var d) ? d : 0;
-            if (!string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+
+            // Normalize uevrBuild to one of the three known values.
+            if (string.Equals(uevrBuild, UevrBuildCustom, StringComparison.OrdinalIgnoreCase))
+                uevrBuild = UevrBuildCustom;
+            else if (string.Equals(uevrBuild, UevrBuildNightly, StringComparison.OrdinalIgnoreCase))
+                uevrBuild = UevrBuildNightly;
+            else
                 uevrBuild = UevrBuildRelease;
+
             bool manualInjection = string.Equals(manualStr, "true", StringComparison.OrdinalIgnoreCase);
 
-            // Invariant: Manual ⇒ Release. The UEVRInjector frontend is only
-            // published at the latest tagged release (1.05); there's no
-            // "nightly frontend." Forcing Release when Manual keeps the saved
-            // metadata honest about which DLLs will actually inject. Any
-            // legacy Nightly+Manual wrapper self-migrates on next read.
-            if (manualInjection) uevrBuild = UevrBuildRelease;
+            // Invariant: Manual without Custom ⇒ Release (only the tagged
+            // praydog release ships a UEVRInjector frontend). Custom can be
+            // either auto-inject (chihuahua + custom DLLs) or manual (custom
+            // UEVRInjector) — no forced coupling.
+            if (manualInjection && uevrBuild != UevrBuildCustom)
+                uevrBuild = UevrBuildRelease;
+
+            // CustomUevrDir is only meaningful when Custom; drop stale values.
+            if (uevrBuild != UevrBuildCustom) customUevrDir = null;
 
             return new WrapperInfo
             {
@@ -172,6 +205,7 @@ namespace UevrLauncher.Services
                 DelaySeconds = delay,
                 UevrBuild = uevrBuild,
                 ManualInjection = manualInjection,
+                CustomUevrDir = customUevrDir,
                 BatPath = batPath,
                 VbsPath = File.Exists(vbsPath) ? vbsPath : null,
             };
